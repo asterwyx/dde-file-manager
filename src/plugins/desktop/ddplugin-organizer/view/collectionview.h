@@ -26,6 +26,7 @@ class CollectionView : public QAbstractItemView
     Q_OBJECT
     friend class CollectionViewPrivate;
     friend class CollectionViewBroker;
+
 public:
     explicit CollectionView(const QString &uuid, CollectionDataProvider *dataProvider, QWidget *parent = nullptr);
     ~CollectionView() override;
@@ -42,6 +43,7 @@ public:
     CollectionDataProvider *dataProvider() const;
     WId winId() const;
     void updateRegionView();
+    void refresh(bool silence);
 
     void openEditor(const QUrl &url);
     void selectUrl(const QUrl &url, const QItemSelectionModel::SelectionFlag &flags);
@@ -59,11 +61,13 @@ public:
     void sort(int role);
     void toggleSelect();
     using QAbstractItemView::selectedIndexes;
+
 protected Q_SLOTS:
     void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
+
 protected:
     QModelIndex moveCursor(CursorAction cursorAction,
-                                   Qt::KeyboardModifiers modifiers) override;
+                           Qt::KeyboardModifiers modifiers) override;
 
     int horizontalOffset() const override;
     int verticalOffset() const override;
@@ -73,6 +77,7 @@ protected:
     void setSelection(const QRect &rect, QItemSelectionModel::SelectionFlags command) override;
     QRegion visualRegionForSelection(const QItemSelection &selection) const override;
     bool lessThan(const QUrl &left, const QUrl &right) const;
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
@@ -91,10 +96,11 @@ protected:
     void focusInEvent(QFocusEvent *event) override;
 
     void scrollContentsBy(int dx, int dy) override;
+
 private:
     QSharedPointer<CollectionViewPrivate> d = nullptr;
 };
 
 }
 
-#endif // COLLECTIONVIEW_H
+#endif   // COLLECTIONVIEW_H

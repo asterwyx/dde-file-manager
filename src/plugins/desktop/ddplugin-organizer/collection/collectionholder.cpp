@@ -13,12 +13,8 @@ using namespace ddplugin_organizer;
 DWIDGET_USE_NAMESPACE
 
 CollectionHolderPrivate::CollectionHolderPrivate(const QString &uuid, CollectionDataProvider *dataProvider, CollectionHolder *qq, QObject *parent)
-    : QObject(qq)
-    , q(qq)
-    , id(uuid)
-    , provider(dataProvider)
+    : QObject(qq), q(qq), id(uuid), provider(dataProvider)
 {
-
 }
 
 CollectionHolderPrivate::~CollectionHolderPrivate()
@@ -32,24 +28,23 @@ CollectionHolderPrivate::~CollectionHolderPrivate()
 void CollectionHolderPrivate::onAdjustFrameSizeMode(const CollectionFrameSize &size)
 {
     sizeMode = size;
+    widget->setCollectionSize(size);
     emit q->styleChanged(id);
 }
 
 CollectionHolder::CollectionHolder(const QString &uuid, ddplugin_organizer::CollectionDataProvider *dataProvider, QObject *parent)
-    : QObject(parent)
-    , d(new CollectionHolderPrivate(uuid, dataProvider, this))
+    : QObject(parent), d(new CollectionHolderPrivate(uuid, dataProvider, this))
 {
     d->styleTimer.setSingleShot(true);
     d->styleTimer.setInterval(500);
 
-    connect(&d->styleTimer, &QTimer::timeout, this, [this](){
+    connect(&d->styleTimer, &QTimer::timeout, this, [this]() {
         emit styleChanged(id());
     });
 }
 
 CollectionHolder::~CollectionHolder()
 {
-
 }
 
 QString CollectionHolder::id() const
@@ -96,8 +91,10 @@ void CollectionHolder::createFrame(Surface *surface, CollectionModel *model)
     d->frame->setWidget(d->widget);
 
     connect(d->widget, &CollectionWidget::sigRequestClose, this, &CollectionHolder::sigRequestClose);
-    connect(d->widget, &CollectionWidget::sigRequestAdjustSizeMode, d.data(), &CollectionHolderPrivate::onAdjustFrameSizeMode);
-    connect(d->frame, &CollectionFrame::geometryChanged, this, [this](){
+    connect(d->widget, &CollectionWidget::sigRequestAdjustSizeMode, d->frame, &CollectionFrame::adjustSizeMode);
+    connect(d->frame, &CollectionFrame::sizeModeChanged, d.data(), &CollectionHolderPrivate::onAdjustFrameSizeMode);
+    connect(d->frame, &CollectionFrame::surfaceChanged, this, &CollectionHolder::frameSurfaceChanged);
+    connect(d->frame, &CollectionFrame::geometryChanged, this, [this]() {
         d->styleTimer.start();
     });
 }

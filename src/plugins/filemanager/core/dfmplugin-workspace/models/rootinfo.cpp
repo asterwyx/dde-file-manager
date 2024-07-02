@@ -40,10 +40,24 @@ RootInfo::~RootInfo()
         thread->traversalThread->stop();
         thread->traversalThread->wait();
     }
+    // wait old dir iterator thread
+    for (const auto &thread : discardedThread) {
+        thread->disconnect();
+        thread->stop();
+        thread->wait();
+    }
 }
 
 bool RootInfo::initThreadOfFileData(const QString &key, DFMGLOBAL_NAMESPACE::ItemRoles role, Qt::SortOrder order, bool isMixFileAndFolder)
 {
+    // clear old dir iterator thread
+    for (auto it = discardedThread.begin(); it != discardedThread.end(); ) {
+        if (!(*it)->isRunning()) {
+            it = discardedThread.erase(it);
+        } else {
+            it++;
+        }
+    }
     // create traversal thread
     QSharedPointer<DirIteratorThread> traversalThread = traversalThreads.value(key);
     bool isGetCache = canCache;
@@ -144,14 +158,9 @@ int RootInfo::clearTraversalThread(const QString &key, const bool isRefresh)
     traversalThread->disconnect(this);
     if (traversalThread->isRunning()) {
         discardedThread.append(traversalThread);
-        connect(thread->traversalThread.data(), &TraversalDirThread::finished, this, [this, traversalThread] {
-            discardedThread.removeAll(traversalThread);
-            traversalThread->disconnect();
-        },
-                Qt::QueuedConnection);
         traversaling = false;
     }
-    thread->traversalThread->quit();
+    thread->traversalThread->stop();
     if (traversalThreads.isEmpty())
         needStartWatcher = true;
 
@@ -175,9 +184,6 @@ void RootInfo::doFileDeleted(const QUrl &url)
 {
     enqueueEvent(QPair<QUrl, EventType>(url, kRmFile));
     metaObject()->invokeMethod(this, QT_STRINGIFY(doThreadWatcherEvent), Qt::QueuedConnection);
-
-    if (UniversalUtils::urlEquals(hiddenFileUrl, url))
-        Q_EMIT watcherUpdateHideFile(url);
 }
 
 void RootInfo::dofileMoved(const QUrl &fromUrl, const QUrl &toUrl)
@@ -190,13 +196,6 @@ void RootInfo::dofileMoved(const QUrl &fromUrl, const QUrl &toUrl)
         info->refresh();
 
     dofileCreated(toUrl);
-
-    // TODO(lanxs) TODO(xust) .hidden file's attribute changed signal not emitted in removable disks (vfat/exfat).
-    // but renamed from a .goutputstream_xxx file
-    // NOTE: GlobalEventType::kHideFiles event is watched in fileview, but this can be used to notify update view
-    // when the file is modified in other way.
-    if (UniversalUtils::urlEquals(hiddenFileUrl, toUrl))
-        Q_EMIT watcherUpdateHideFile(toUrl);
 }
 
 void RootInfo::dofileCreated(const QUrl &url)
@@ -247,7 +246,7 @@ void RootInfo::doWatcherEvent()
             if (emptyLoopCount >= 5)
                 break;
 
-            QThread::msleep(10);
+            QThread::msleep(20);
             if (adds.isEmpty() && updates.isEmpty() && removes.isEmpty())
                 oldtime = timer.elapsed();
 
@@ -304,6 +303,7 @@ void RootInfo::doWatcherEvent()
             removes.append(fileUrl);
         }
     }
+    processFileEventRuning = false;
 
     // 处理添加文件
     if (!removes.isEmpty())
@@ -312,7 +312,6 @@ void RootInfo::doWatcherEvent()
         addChildren(adds);
     if (!updates.isEmpty())
         updateChildren(updates);
-    processFileEventRuning = false;
 }
 
 void RootInfo::doThreadWatcherEvent()
@@ -526,6 +525,9 @@ void RootInfo::removeChildren(const QList<QUrl> &urlList)
 
     if (removeChildren.count() > 0)
         emit watcherRemoveFiles(removeChildren);
+
+    if (removeUrls.contains(hiddenFileUrl))
+        Q_EMIT watcherUpdateHideFile(hiddenFileUrl);
 }
 
 bool RootInfo::containsChild(const QUrl &url)

@@ -37,6 +37,8 @@
 #include <algorithm>
 #include <unistd.h>
 #include <malloc.h>
+#include <dfm-base/utils/windowutils.h>
+#include <QSurfaceFormat>
 
 Q_LOGGING_CATEGORY(logAppDesktop, "org.deepin.dde.filemanager.desktop")
 
@@ -236,8 +238,29 @@ static void waitingForKwin()
     qCWarning(logAppDesktop) << "waiting for kwin ready cost" << elapsed << "ms";
 }
 
+bool first_check_wayland_env()
+{
+    auto e = QProcessEnvironment::systemEnvironment();
+    QString XDG_SESSION_TYPE = e.value(QStringLiteral("XDG_SESSION_TYPE"));
+    QString WAYLAND_DISPLAY = e.value(QStringLiteral("WAYLAND_DISPLAY"));
+
+    if (XDG_SESSION_TYPE == QLatin1String("wayland") || WAYLAND_DISPLAY.contains(QLatin1String("wayland"), Qt::CaseInsensitive)) {
+        return true;
+    } else {
+        return false;
+    }
+}
 int main(int argc, char *argv[])
 {
+    if(first_check_wayland_env()) {
+        qputenv("QT_WAYLAND_SHELL_INTEGRATION", "kwayland-shell");
+        setenv("PULSE_PROP_media.role", "video", 1);
+#ifndef __x86_64__
+        QSurfaceFormat format;
+        format.setRenderableType(QSurfaceFormat::OpenGLES);
+        format.setDefaultFormat(format);
+#endif
+    }
     initLog();
     QString mainTime = QDateTime::currentDateTime().toString();
     DApplication a(argc, argv);

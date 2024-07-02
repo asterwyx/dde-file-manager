@@ -218,7 +218,6 @@ FileDialog::FileDialog(const QUrl &url, QWidget *parent)
     initializeUi();
     initConnect();
     initEventsConnect();
-    initEventsFilter();
 }
 
 FileDialog::~FileDialog()
@@ -662,6 +661,16 @@ bool FileDialog::hideOnAccept() const
     return d->hideOnAccept;
 }
 
+QUrl FileDialog::getcurrenturl() const
+{
+    return d->currentUrl;
+}
+
+bool FileDialog::checkFileSuffix(const QString &filename, QString &suffix)
+{
+    return d->checkFileSuffix(filename, suffix);
+}
+
 void FileDialog::accept()
 {
     done(QDialog::Accepted);
@@ -913,6 +922,7 @@ void FileDialog::handleUrlChanged(const QUrl &url)
     emit initialized();
     dpfSlotChannel->push("dfmplugin_workspace", "slot_Model_SetNameFilter", internalWinId(), curNameFilters);
     dpfSlotChannel->push("dfmplugin_workspace", "slot_View_SetAlwaysOpenInCurrentWindow", internalWinId());
+    d->currentUrl = url;
 }
 
 void FileDialog::onViewSelectionChanged(const quint64 windowID, const QItemSelection &selected, const QItemSelection &deselected)
@@ -1070,32 +1080,6 @@ void FileDialog::initEventsConnect()
 {
     dpfSignalDispatcher->subscribe("dfmplugin_workspace", "signal_View_RenameStartEdit", this, &FileDialog::handleRenameStartAcceptBtn);
     dpfSignalDispatcher->subscribe("dfmplugin_workspace", "signal_View_RenameEndEdit", this, &FileDialog::handleRenameEndAcceptBtn);
-}
-
-void FileDialog::initEventsFilter()
-{
-    dpfSignalDispatcher->installGlobalEventFilter(this, [this](DPF_NAMESPACE::EventType type, const QVariantList &params) -> bool {
-        if (type == GlobalEventType::kOpenFiles) {
-            onAcceptButtonClicked();
-            return true;
-        }
-
-        if (type == GlobalEventType::kOpenNewWindow && params.size() > 0) {
-            d->handleOpenNewWindow(params.at(0).toUrl());
-            return true;
-        }
-
-        static QList<DPF_NAMESPACE::EventType> filterTypeGroup { GlobalEventType::kOpenNewTab,
-                                                                 GlobalEventType::kOpenAsAdmin,
-                                                                 GlobalEventType::kOpenFilesByApp,
-                                                                 GlobalEventType::kCreateSymlink,
-                                                                 GlobalEventType::kOpenInTerminal,
-                                                                 GlobalEventType::kHideFiles };
-        if (filterTypeGroup.contains(type))
-            return true;
-
-        return false;
-    });
 }
 
 /*!

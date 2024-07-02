@@ -176,26 +176,10 @@ RecentManager::RecentManager(QObject *parent)
 
 RecentManager::~RecentManager()
 {
-    if (watcher) {
-        watcher->disconnect(this);
-        watcher->stopWatcher();
-    }
-    iteratorWorker->stop();
-    workerThread.quit();
-    workerThread.wait(15000);
 }
 
 void RecentManager::init()
 {
-    connect(qApp, &QApplication::aboutToQuit, this, [this](){
-        if (watcher) {
-            watcher->disconnect(this);
-            watcher->stopWatcher();
-        }
-        iteratorWorker->stop();
-        workerThread.quit();
-        workerThread.wait(150);
-    });
     iteratorWorker->moveToThread(&workerThread);
     connect(&workerThread, &QThread::finished, iteratorWorker, &QObject::deleteLater);
     connect(this, &RecentManager::asyncHandleFileChanged,
@@ -205,6 +189,17 @@ void RecentManager::init()
             &RecentManager::onUpdateRecentFileInfo);
     connect(iteratorWorker, &RecentIterateWorker::deleteExistRecentUrls, this,
             &RecentManager::onDeleteExistRecentUrls);
+    connect(qApp, &QApplication::aboutToQuit, this, [this](){
+        if (watcher) {
+            watcher->stopWatcher();
+            watcher->disconnect(this);
+        }
+        iteratorWorker->stop();
+        if (workerThread.isRunning()) {
+            workerThread.quit();
+            workerThread.wait();
+        }
+    });
 
     workerThread.start();
 

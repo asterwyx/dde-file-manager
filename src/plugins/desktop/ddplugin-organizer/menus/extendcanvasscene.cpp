@@ -33,11 +33,12 @@ ExtendCanvasScenePrivate::ExtendCanvasScenePrivate(ExtendCanvasScene *qq)
 
 void ExtendCanvasScenePrivate::emptyMenu(QMenu *parent)
 {
-    QAction *tempAction = parent->addAction(predicateName.value(ActionID::kOrganizeDesktop));
-    predicateAction[ActionID::kOrganizeDesktop] = tempAction;
-    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeDesktop));
-    tempAction->setCheckable(true);
-    tempAction->setChecked(turnOn);
+    QAction *tempAction = nullptr;
+    // tempAction = parent->addAction(predicateName.value(ActionID::kOrganizeEnable));
+    // predicateAction[ActionID::kOrganizeEnable] = tempAction;
+    // tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeEnable));
+    // tempAction->setCheckable(true);
+    // tempAction->setChecked(turnOn);
 
     if (turnOn) {
 #ifdef EnableCollectionModeMenu
@@ -46,6 +47,11 @@ void ExtendCanvasScenePrivate::emptyMenu(QMenu *parent)
         predicateAction[ActionID::kOrganizeBy] = tempAction;
         tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeBy));
 #endif
+        if (ConfigPresenter::instance()->organizeOnTriggered()) {
+            tempAction = new QAction(predicateName.value(ActionID::kOrganizeTrigger), parent);
+            predicateAction[ActionID::kOrganizeTrigger] = tempAction;
+            tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeTrigger));
+        }
     }
 
     tempAction = parent->addAction(predicateName.value(ActionID::kOrganizeOptions));
@@ -70,84 +76,21 @@ void ExtendCanvasScenePrivate::normalMenu(QMenu *parent)
 void ExtendCanvasScenePrivate::updateEmptyMenu(QMenu *parent)
 {
     auto actions = parent->actions();
-    // auto arrage
-    {
-        auto actionIter = std::find_if(actions.begin(), actions.end(), [](const QAction *ac) {
-            return ac->property(ActionPropertyKey::kActionID).toString() == ddplugin_canvas::ActionID::kAutoArrange;
-        });
-
-        if (actionIter != actions.end() && turnOn) {
-            bool hide = false;
-            if (CfgPresenter->mode() == OrganizerMode::kCustom) {
-                hide = onCollection;   // don't show on colletion.
-            } else if (CfgPresenter->mode() == OrganizerMode::kNormalized) {
-                hide = true;   // don't show in normal mode.
-            }
-            if (hide)
-                (*actionIter)->setVisible(false);
-        }
-    }
-
-    // sort by
-    {
-        auto actionIter = std::find_if(actions.begin(), actions.end(), [](const QAction *ac) {
-            return ac->property(ActionPropertyKey::kActionID).toString() == ddplugin_canvas::ActionID::kSortBy;
-        });
-
-        // normal mode
-        if (actionIter != actions.end()
-            && turnOn
-            && CfgPresenter->mode() == OrganizerMode::kNormalized) {
-            // on desktop
-            if (!onCollection)
-                (*actionIter)->setVisible(false);
-        }
-    }
-
-    // select all
-    {
-        auto actionIter = std::find_if(actions.begin(), actions.end(), [](const QAction *ac) {
-            return ac->property(ActionPropertyKey::kActionID).toString() == dfmplugin_menu::ActionID::kSelectAll;
-        });
-
-        // normal mode
-        if (actionIter != actions.end()
-            && turnOn
-            && CfgPresenter->mode() == OrganizerMode::kNormalized) {
-            // on desktop
-            if (!onCollection)
-                (*actionIter)->setVisible(false);
-        }
-    }
-
-    // wallpager
-    {
-        auto actionIter = std::find_if(actions.begin(), actions.end(), [](const QAction *ac) {
-            return ac->property(ActionPropertyKey::kActionID).toString() == ddplugin_canvas::ActionID::kWallpaperSettings;
-        });
-
-        // normal mode
-        if (actionIter != actions.end()
-            && turnOn
-            && CfgPresenter->mode() == OrganizerMode::kNormalized) {
-            // on onCollection
-            if (onCollection)
-                (*actionIter)->setVisible(false);
-        }
-    }
 
     // Organize Desktop
     {
-        auto actionIter = std::find_if(actions.begin(), actions.end(), [](const QAction *ac) {
-            return ac->property(ActionPropertyKey::kActionID).toString() == ddplugin_canvas::ActionID::kDisplaySettings;
+        auto it = std::find_if(actions.begin(), actions.end(), [](QAction *action) {
+            return action->property(ActionPropertyKey::kActionID).toString() == ddplugin_canvas::ActionID::kSortBy;
         });
 
-        if (actionIter == actions.end()) {
+        // net one
+        int pos { (it != actions.end()) ? int(std::distance(actions.begin(), it)) + 1 : -1 };
+        if (pos == -1 || pos >= actions.size()) {
             fmWarning() << "can not find action:"
-                       << "display-settings";
+                        << "display-settings";
         } else {
-            QAction *indexAction = *actionIter;
-            parent->insertAction(indexAction, predicateAction[ActionID::kOrganizeDesktop]);
+            QAction *indexAction = actions[pos];
+            parent->insertAction(indexAction, predicateAction[ActionID::kOrganizeEnable]);
             if (turnOn) {
                 parent->insertAction(indexAction, predicateAction[ActionID::kOrganizeBy]);
                 parent->insertAction(indexAction, predicateAction[ActionID::kOrganizeOptions]);
@@ -165,6 +108,21 @@ void ExtendCanvasScenePrivate::updateEmptyMenu(QMenu *parent)
                     indexAction->setVisible(false);
             } else {
                 parent->insertAction(indexAction, predicateAction[ActionID::kOrganizeOptions]);
+            }
+        }
+
+        if (turnOn) {
+            auto refreshPos = std::find_if(actions.begin(), actions.end(), [](QAction *action) {
+                return action->property(ActionPropertyKey::kActionID).toString() == "refresh";
+            });
+            if (refreshPos == actions.end()) {
+                parent->addAction(predicateAction[ActionID::kOrganizeTrigger]);
+            } else {
+                int idx = int(std::distance(actions.begin(), refreshPos)) + 1;
+                if (idx < actions.count()) {
+                    auto act = actions.at(idx);
+                    parent->insertAction(act, predicateAction[ActionID::kOrganizeTrigger]);
+                }
             }
         }
     }
@@ -187,30 +145,32 @@ QMenu *ExtendCanvasScenePrivate::organizeBySubActions(QMenu *menu)
 {
     QMenu *subMenu = new QMenu(menu);
 
-    //    QAction *tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByCustom));
-    //    predicateAction[ActionID::kOrganizeByCustom] = tempAction;
-    //    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByCustom));
-    //    tempAction->setCheckable(true);
+#ifdef EnableCollectionModeMenu
+    QAction *tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByCustom));
+    predicateAction[ActionID::kOrganizeByCustom] = tempAction;
+    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByCustom));
+    tempAction->setCheckable(true);
 
-    //    QAction *tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByType));
-    //    predicateAction[ActionID::kOrganizeByType] = tempAction;
-    //    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByType));
-    //    tempAction->setCheckable(true);
+    tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByType));
+    predicateAction[ActionID::kOrganizeByType] = tempAction;
+    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByType));
+    tempAction->setCheckable(true);
 
-    //    tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeAccessed));
-    //    predicateAction[ActionID::kOrganizeByTimeAccessed] = tempAction;
-    //    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeAccessed));
-    //    tempAction->setCheckable(true);
+//        tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeAccessed));
+//        predicateAction[ActionID::kOrganizeByTimeAccessed] = tempAction;
+//        tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeAccessed));
+//        tempAction->setCheckable(true);
 
-    //    tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeModified));
-    //    predicateAction[ActionID::kOrganizeByTimeModified] = tempAction;
-    //    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeModified));
-    //    tempAction->setCheckable(true);
+//        tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeModified));
+//        predicateAction[ActionID::kOrganizeByTimeModified] = tempAction;
+//        tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeModified));
+//        tempAction->setCheckable(true);
 
-    //    tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeCreated));
-    //    predicateAction[ActionID::kOrganizeByTimeCreated] = tempAction;
-    //    tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeCreated));
-    //    tempAction->setCheckable(true);
+//        tempAction = subMenu->addAction(predicateName.value(ActionID::kOrganizeByTimeCreated));
+//        predicateAction[ActionID::kOrganizeByTimeCreated] = tempAction;
+//        tempAction->setProperty(ActionPropertyKey::kActionID, QString(ActionID::kOrganizeByTimeCreated));
+//        tempAction->setCheckable(true);
+#endif
 
     return subMenu;
 }
@@ -267,8 +227,9 @@ bool ExtendCanvasScenePrivate::triggerSortby(const QString &actionId)
 ExtendCanvasScene::ExtendCanvasScene(QObject *parent)
     : AbstractMenuScene(parent), d(new ExtendCanvasScenePrivate(this))
 {
-    d->predicateName[ActionID::kOrganizeDesktop] = tr("Organize desktop");
-    d->predicateName[ActionID::kOrganizeOptions] = tr("Desktop options");
+    d->predicateName[ActionID::kOrganizeEnable] = tr("Enable desktop organization");
+    d->predicateName[ActionID::kOrganizeTrigger] = tr("Organize desktop");
+    d->predicateName[ActionID::kOrganizeOptions] = tr("View options");
     d->predicateName[ActionID::kOrganizeBy] = tr("Organize by");
 
     // organize by subactions
@@ -344,7 +305,7 @@ bool ExtendCanvasScene::triggered(QAction *action)
     auto actionId = action->property(ActionPropertyKey::kActionID).toString();
     if (d->predicateAction.values().contains(action)) {
         fmDebug() << "organizer for canvas:" << actionId;
-        if (actionId == ActionID::kOrganizeDesktop) {
+        if (actionId == ActionID::kOrganizeEnable) {
             emit CfgPresenter->changeEnableState(action->isChecked());
         } else if (actionId == ActionID::kOrganizeByCustom) {
             emit CfgPresenter->switchToCustom();
@@ -360,6 +321,8 @@ bool ExtendCanvasScene::triggered(QAction *action)
             emit CfgPresenter->newCollection(d->selectFiles);
         } else if (actionId == ActionID::kOrganizeOptions) {
             emit CfgPresenter->showOptionWindow();
+        } else if (actionId == ActionID::kOrganizeTrigger) {
+            emit CfgPresenter->reorganizeDesktop();
         }
         return true;
     }
@@ -369,8 +332,11 @@ bool ExtendCanvasScene::triggered(QAction *action)
 
 bool ExtendCanvasScene::actionFilter(AbstractMenuScene *caller, QAction *action)
 {
-    if (d->onCollection && caller && action) {
-        auto actionId = action->property(ActionPropertyKey::kActionID).toString();
+    if (!caller || !action)
+        return false;
+
+    auto actionId = action->property(ActionPropertyKey::kActionID).toString();
+    if (d->onCollection) {
         bool isCanvas = caller->name() == "CanvasMenu";
         Q_ASSERT_X(isCanvas, "ExtendCanvasScene", "parent scene is not CanvasMenu");
         if (isCanvas) {
@@ -420,6 +386,10 @@ bool ExtendCanvasScene::actionFilter(AbstractMenuScene *caller, QAction *action)
         } else {
             fmCritical() << "ExtendCanvasScene's parent is not CanvasMenu";
         }
+    } else {
+        // 为了能够选中所有集合中的文件
+        if (dfmplugin_menu::ActionID::kSelectAll == actionId)
+            dpfSlotChannel->push("ddplugin_organizer", "slot_CollectionModel_SelectAll");
     }
 
     return false;

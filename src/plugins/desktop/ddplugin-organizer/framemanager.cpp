@@ -13,7 +13,10 @@
 #include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
 #include <dfm-base/dfm_desktop_defines.h>
 
+#include <DDBusSender>
+
 #include <QAbstractItemView>
+#include <QDBusInterface>
 
 DFMBASE_USE_NAMESPACE
 using namespace ddplugin_organizer;
@@ -25,10 +28,8 @@ using namespace ddplugin_organizer;
     dpfSignalDispatcher->unsubscribe("ddplugin_core", QT_STRINGIFY2(topic), this, func);
 
 FrameManagerPrivate::FrameManagerPrivate(FrameManager *qq)
-    : QObject(qq)
-    , q(qq)
+    : QObject(qq), q(qq)
 {
-
 }
 
 FrameManagerPrivate::~FrameManagerPrivate()
@@ -98,7 +99,7 @@ void FrameManagerPrivate::layoutSurface(QWidget *root, SurfacePointer surface, b
     Q_ASSERT(surface);
     Q_ASSERT(root);
 
-    auto view = dynamic_cast< QAbstractItemView *>(findView(root));
+    auto view = dynamic_cast<QAbstractItemView *>(findView(root));
     // check hidden flags
     if (view && !hidden) {
         surface->setParent(view->viewport());
@@ -134,6 +135,45 @@ void FrameManagerPrivate::refeshCanvas()
         canvas->canvasModel()->refresh(0, false);
 }
 
+void FrameManagerPrivate::onHideAllKeyPressed()
+{
+    const auto &surfaces { organizer->getSurfaces() };
+    if (surfaces.count() <= 0)
+        return;
+
+    fmDebug() << "Hide/Show all collections!";
+
+    bool aboutToHide = surfaces.at(0)->isVisible();
+    std::for_each(surfaces.begin(), surfaces.end(), [](SurfacePointer surface) {
+        surface->setVisible(!surface->isVisible());
+    });
+
+    if (!CfgPresenter->isRepeatNoMore() && aboutToHide) {
+        uint notifyId = QDate::currentDate().daysInYear();
+        QString keySequence = CfgPresenter->hideAllKeySequence().toString();
+        QString tips = tr("To disable the One-Click Hide feature, invoke the \"View Options\" window "
+                          "in the desktop context menu and turn off the \"One-Click Hide Collection\".");
+        QString cmdNoRepeation = "dde-dconfig,--set,-a,org.deepin.dde.file-manager,-r,org.deepin.dde.file-manager.desktop.organizer,-k,hideAllDialogRepeatNoMore,-v,true";
+        QString cmdCloseNotify = QString("dbus-send,--type=method_call,--dest=org.freedesktop.Notifications,/org/freedesktop/Notifications,com.deepin.dde.Notification.CloseNotification,uint32:%1")
+                                         .arg(notifyId);
+        DDBusSender()
+                .service("org.freedesktop.Notifications")
+                .path("/org/freedesktop/Notifications")
+                .interface("org.freedesktop.Notifications")
+                .method(QString("Notify"))
+                .arg(tr("Desktop organizer"))
+                .arg(notifyId)
+                .arg(QString("dde-desktop"))
+                .arg(tr("Shortcut \"%1\" to show collections").arg(keySequence))
+                .arg(tips)
+                .arg(QStringList { "close-notify", tr("Close"), "no-repeat", tr("No more prompts") })
+                .arg(QVariantMap { { "x-deepin-action-no-repeat", cmdNoRepeation },
+                                   { "x-deepin-action-close-notify", cmdCloseNotify } })
+                .arg(3000)
+                .call();
+    }
+}
+
 void FrameManagerPrivate::enableChanged(bool e)
 {
     if (e == CfgPresenter->isEnable())
@@ -145,6 +185,16 @@ void FrameManagerPrivate::enableChanged(bool e)
         q->turnOn();
     else
         q->turnOff();
+}
+
+void FrameManagerPrivate::enableVisibility(bool e)
+{
+    CfgPresenter->setEnableVisibility(e);
+}
+
+void FrameManagerPrivate::saveHideAllSequence(const QKeySequence &seq)
+{
+    CfgPresenter->setHideAllKeySequence(seq);
 }
 
 void FrameManagerPrivate::switchToCustom()
@@ -184,9 +234,10 @@ void FrameManagerPrivate::showOptionWindow()
     options = new OptionsWindow();
     options->setAttribute(Qt::WA_DeleteOnClose);
     options->initialize();
-    connect(options, &OptionsWindow::destroyed, this, [this](){
+    connect(options, &OptionsWindow::destroyed, this, [this]() {
         options = nullptr;
-    }, Qt::DirectConnection);
+    },
+            Qt::DirectConnection);
 
     options->moveToCenter(QCursor::pos());
     options->show();
@@ -209,10 +260,8 @@ QWidget *FrameManagerPrivate::findView(QWidget *root) const
 }
 
 FrameManager::FrameManager(QObject *parent)
-    : QObject(parent)
-    , d(new FrameManagerPrivate(this))
+    : QObject(parent), d(new FrameManagerPrivate(this))
 {
-
 }
 
 FrameManager::~FrameManager()
@@ -238,9 +287,11 @@ bool FrameManager::initialize()
     bool enable = CfgPresenter->isEnable();
     fmInfo() << "Organizer enable:" << enable;
     if (enable)
-        turnOn(false); // builded by signal.
+        turnOn(false);   // builded by signal.
 
     connect(CfgPresenter, &ConfigPresenter::changeEnableState, d, &FrameManagerPrivate::enableChanged, Qt::QueuedConnection);
+    connect(CfgPresenter, &ConfigPresenter::changeEnableVisibilityState, d, &FrameManagerPrivate::enableVisibility, Qt::QueuedConnection);
+    connect(CfgPresenter, &ConfigPresenter::changeHideAllKeySequence, d, &FrameManagerPrivate::saveHideAllSequence, Qt::QueuedConnection);
     connect(CfgPresenter, &ConfigPresenter::switchToNormalized, d, &FrameManagerPrivate::switchToNormalized, Qt::QueuedConnection);
     connect(CfgPresenter, &ConfigPresenter::switchToCustom, d, &FrameManagerPrivate::switchToCustom, Qt::QueuedConnection);
     connect(CfgPresenter, &ConfigPresenter::showOptionWindow, d, &FrameManagerPrivate::showOptionWindow, Qt::QueuedConnection);
@@ -265,6 +316,7 @@ void FrameManager::switchMode(OrganizerMode mode)
     Q_ASSERT(d->organizer);
 
     connect(d->organizer, &CanvasOrganizer::collectionChanged, d, &FrameManagerPrivate::refeshCanvas);
+    connect(d->organizer, &CanvasOrganizer::hideAllKeyPressed, d, &FrameManagerPrivate::onHideAllKeyPressed);
 
     // initialize to create collection widgets
     if (!d->surfaceWidgets.isEmpty())
@@ -280,6 +332,12 @@ void FrameManager::switchMode(OrganizerMode mode)
 
 void FrameManager::turnOn(bool build)
 {
+#ifdef QT_DEBUG
+    QDBusInterface ifs("com.deepin.dde.desktop",
+                       "/org/deepin/dde/desktop/canvas",
+                       "org.deepin.dde.desktop.canvas");
+    ifs.call("EnableUIDebug", QVariant::fromValue(false));
+#endif
     Q_ASSERT(!d->canvas);
     Q_ASSERT(!d->model);
     Q_ASSERT(!d->organizer);
@@ -303,15 +361,16 @@ void FrameManager::turnOn(bool build)
         for (const SurfacePointer &sur : d->surfaceWidgets.values())
             sur->setVisible(true);
     }
-
-    // adjust canvas icon level
-    int viewIconLevel = d->canvas->iconLevel();
-    if (viewIconLevel > 2)
-        d->canvas->setIconLevel(2);
 }
 
 void FrameManager::turnOff()
 {
+#ifdef QT_DEBUG
+    QDBusInterface ifs("com.deepin.dde.desktop",
+                       "/org/deepin/dde/desktop/canvas",
+                       "org.deepin.dde.desktop.canvas");
+    ifs.call("EnableUIDebug", QVariant::fromValue(true));
+#endif
     CanvasCoreUnsubscribe(signal_DesktopFrame_WindowAboutToBeBuilded, &FrameManager::onDetachWindows);
     CanvasCoreUnsubscribe(signal_DesktopFrame_WindowBuilded, &FrameManager::onBuild);
     CanvasCoreUnsubscribe(signal_DesktopFrame_WindowShowed, &FrameManager::onWindowShowed);
@@ -338,8 +397,16 @@ bool FrameManager::organizerEnabled()
     return CfgPresenter->isEnable();
 }
 
+bool FrameManager::hookCanvasMenu(int, const QUrl &, const QList<QUrl> &, const QPoint &, void *)
+{
+    return d->organizer ? d->organizer->isEditing() : false;
+}
+
 void FrameManager::onBuild()
 {
+    // 1071 added, tag config file changed
+    if (CfgPresenter->version() != "2.0.0")
+        CfgPresenter->setVersion("2.0.0");
     d->buildSurface();
 
     if (d->organizer) {
@@ -379,4 +446,3 @@ void FrameManager::onGeometryChanged()
     if (d->organizer)
         d->organizer->layout();
 }
-

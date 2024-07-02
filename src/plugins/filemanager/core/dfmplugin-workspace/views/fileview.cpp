@@ -972,6 +972,8 @@ void FileView::onSelectionChanged(const QItemSelection &selected, const QItemSel
 {
     delayUpdateStatusBar();
 
+    emit selectUrlChanged(selectedUrlList());
+
     quint64 winId = WorkspaceHelper::instance()->windowId(this);
     WorkspaceEventCaller::sendViewSelectionChanged(winId, selected, deselected);
 }
@@ -1584,7 +1586,9 @@ void FileView::contextMenuEvent(QContextMenuEvent *event)
 
             selectionModel()->select(index, QItemSelectionModel::Select);
         }
-
+        auto info = model()->fileInfo(index);
+        if (info)
+            info->updateAttributes();
         d->viewMenuHelper->showNormalMenu(index, model()->flags(index));
     }
 }
