@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,6 +17,7 @@ class FrameManager : public QObject
 {
     Q_OBJECT
     friend class FrameManagerPrivate;
+
 public:
     explicit FrameManager(QObject *parent = nullptr);
     ~FrameManager() override;
@@ -26,6 +27,7 @@ public:
     void turnOff();
 
     bool organizerEnabled();
+
 signals:
 
 public slots:
@@ -33,12 +35,14 @@ public slots:
     void onWindowShowed();
     void onDetachWindows();
     void onGeometryChanged();
+
 protected:
     void switchMode(OrganizerMode mode);
+
 private:
     FrameManagerPrivate *d = nullptr;
 };
 
 }
 
-#endif // FRAMEMANAGER_H
+#endif   // FRAMEMANAGER_H

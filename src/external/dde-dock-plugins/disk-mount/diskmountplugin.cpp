@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,9 +7,9 @@
 #include "widgets/diskpluginitem.h"
 #include "widgets/devicelist.h"
 #include "device/dockitemdatamanager.h"
+#include "utils/dockutils.h"
 
 #include <DApplication>
-#include <QGSettings>
 
 Q_DECLARE_LOGGING_CATEGORY(logAppDock)
 
@@ -34,6 +34,7 @@ DiskMountPlugin::DiskMountPlugin(QObject *parent)
     loadTranslator();
     diskPluginItem->setVisible(false);
     tipsLabel->setObjectName("diskmount");
+    tipsLabel->setAccessibleName("TipsLabel");
     tipsLabel->setVisible(false);
     tipsLabel->setText(tr("Disk"));
 }
@@ -79,10 +80,7 @@ const QString DiskMountPlugin::itemContextMenu(const QString &itemKey)
 
     QList<QVariant> items;
     items.reserve(2);
-
-    QGSettings settings("com.deepin.dde.dock.module.disk-mount", "/com/deepin/dde/dock/module/disk-mount/");
-
-    if (settings.get("filemanagerIntegration").toBool()) {
+    if (common_utils::isIntegratedByFilemanager()) {
         QMap<QString, QVariant> open;
         open["itemId"] = kOpen;
         open["itemText"] = tr("Open");
@@ -139,6 +137,7 @@ void DiskMountPlugin::setDockEntryVisible(bool visible)
         proxyInter()->itemAdded(this, kDiskMountKey);
     else
         proxyInter()->itemRemoved(this, kDiskMountKey);
+    diskPluginItem->setVisible(visible);
 }
 
 void DiskMountPlugin::loadTranslator()
@@ -180,19 +179,3 @@ std::once_flag &DiskMountPlugin::onceFlag()
     static std::once_flag flag;
     return flag;
 }
-
-#ifdef COMPILE_ON_V23
-QIcon DiskMountPlugin::icon(const DockPart &dockPart, DGuiApplicationHelper::ColorType)
-{
-    if (dockPart == DockPart::SystemPanel) {
-        diskPluginItem->updateIcon();
-        return diskPluginItem->getIcon();
-    }
-    return QIcon();
-}
-
-PluginFlags DiskMountPlugin::flags() const
-{
-    return PluginFlag::Type_Tray | PluginFlag::Attribute_CanDrag | PluginFlag::Attribute_CanInsert;
-}
-#endif

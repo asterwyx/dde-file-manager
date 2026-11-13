@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,11 +7,14 @@
 #include <dfm-base/utils/windowutils.h>
 #include <dfm-base/utils/sysinfoutils.h>
 #include <dfm-base/utils/systempathutil.h>
+#include <dfm-base/utils/protocolutils.h>
+#include <dfm-base/utils/threadcontainer.h>
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/utils/dialogmanager.h>
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/utils/finallyutil.h>
 #include <dfm-base/base/device/deviceutils.h>
+#include <dfm-base/utils/networkutils.h>
 #include <dfm-base/base/device/deviceproxymanager.h>
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/base/application/application.h>
@@ -23,8 +26,13 @@
 #include <dfm-base/mimetype/dmimedatabase.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 
-#include <KCodecs>
-#include <KEncodingProber>
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+#    include <KCodecs>
+#    include <KEncodingProber>
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#    include <QColorSpace>
+#endif
 
 #include <dfm-io/dfmio_utils.h>
 #include <dfm-io/dfile.h>
@@ -33,10 +41,13 @@
 #include <QFileInfo>
 #include <QTimer>
 #include <QDir>
+#include <QMimeData>
 #include <QProcess>
 #include <QDebug>
 #include <QApplication>
-#include <QTextCodec>
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+#    include <QTextCodec>
+#endif
 #include <QSet>
 #include <QRegularExpression>
 #include <QCollator>
@@ -48,31 +59,35 @@
 
 #include <DDBusSender>
 
+#include <atomic>
+
+namespace {
+std::atomic<int> kTrashEmptyState { static_cast<int>(dfmbase::FileUtils::TrashEmptyState::kUnknown) };
+}
+
 #include <unistd.h>
 #include <sys/stat.h>
 #include <linux/limits.h>
 
-#ifdef COMPILE_ON_V23
-#    define APPEARANCE_SERVICE "org.deepin.dde.Appearance1"
-#    define APPEARANCE_PATH "/org/deepin/dde/Appearance1"
-#else
-#    define APPEARANCE_SERVICE "com.deepin.daemon.Appearance"
-#    define APPEARANCE_PATH "/com/deepin/daemon/Appearance"
-#endif
+#define APPEARANCE_SERVICE "org.deepin.dde.Appearance1"
+#define APPEARANCE_PATH "/org/deepin/dde/Appearance1"
+
+using namespace GlobalDConfDefines::ConfigPath;
 
 namespace dfmbase {
 
 static constexpr char kDDETrashId[] { "dde-trash" };
 static constexpr char kDDEComputerId[] { "dde-computer" };
 static constexpr char kDDEHomeId[] { "dde-home" };
-static constexpr char kSharePixmapPath[] { "/usr/share/pixmaps" };
 static constexpr char kFileAllTrash[] { "dfm.trash.allfiletotrash" };
 const static int kDefaultMemoryPageSize = 4096;
 
 QMutex FileUtils::cacheCopyingMutex;
 QSet<QUrl> FileUtils::copyingUrl;
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 static float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, const QLocale::Country &country);
+#endif
 
 QString sizeString(const QString &str)
 {
@@ -96,7 +111,7 @@ QString sizeString(const QString &str)
 QString FileUtils::formatSize(qint64 num, bool withUnitVisible, int precision, int forceUnit, QStringList unitList)
 {
     if (num < 0) {
-        qCWarning(logDFMBase) << "Negative number passed to formatSize():" << num;
+        qCWarning(logDFMBase) << "Invalid negative size value passed to formatSize:" << num;
         num = 0;
     }
 
@@ -151,44 +166,7 @@ int FileUtils::supportedMaxLength(const QString &fileSystem)
         { "reiserfs", 15 },   // man 8 mkreiserfs said its max length is 16, but after tested, only 15 chars are accepted.
         { "xfs", 12 }   // https://github.com/edward6/reiser4progs/blob/master/include/reiser4/types.h fs_hint_t
     };
-    return datas.value(fileSystem.toLower(), 11);
-}
-
-bool FileUtils::isGvfsFile(const QUrl &url)
-{
-    if (!url.isValid())
-        return false;
-
-    const QString &path = url.toLocalFile();
-    static const QString gvfsMatch { "(^/run/user/\\d+/gvfs/|^/root/.gvfs/|^/media/[\\s\\S]*/smbmounts)" };
-    // TODO(xust) /media/$USER/smbmounts might be changed in the future.
-    QRegularExpression re { gvfsMatch };
-    QRegularExpressionMatch match { re.match(path) };
-    return match.hasMatch();
-}
-
-bool FileUtils::isMtpFile(const QUrl &url)
-{
-    if (!url.isValid())
-        return false;
-
-    const QString &path = url.toLocalFile();
-    static const QString gvfsMatch { R"(^/run/user/\d+/gvfs/mtp:host|^/root/.gvfs/mtp:host)" };
-    QRegularExpression re { gvfsMatch };
-    QRegularExpressionMatch match { re.match(path) };
-    return match.hasMatch();
-}
-
-bool FileUtils::isGphotoFile(const QUrl &url)
-{
-    if (!url.isValid())
-        return false;
-
-    const QString &path = url.toLocalFile();
-    static const QString gvfsMatch { R"(^/run/user/\d+/gvfs/gphoto2:host|^/root/.gvfs/gphoto2:host)" };
-    QRegularExpression re { gvfsMatch };
-    QRegularExpressionMatch match { re.match(path) };
-    return match.hasMatch();
+    return datas.value(fileSystem.toLower(), 40);
 }
 
 QString FileUtils::preprocessingFileName(QString name)
@@ -265,11 +243,18 @@ bool FileUtils::isContainProhibitPath(const QList<QUrl> &urls)
 
 bool FileUtils::isDesktopFile(const QUrl &url)
 {
-    // At present, there is no dfmio library code. For temporary repair, use the method on v20 to obtain mimeType
-    auto info = InfoFactory::create<FileInfo>(url);
-    if (!info)
+    if (ProtocolUtils::isRemoteFile(url))
         return false;
-    return isDesktopFileInfo(info);
+
+    if (isDesktopFileSuffix(url))
+        return QFileInfo(url.toLocalFile()).isFile();
+
+    const QString &target = symlinkTarget(url);
+    if (!target.isEmpty()
+        && target.endsWith(QString(".") + DFMBASE_NAMESPACE::Global::Scheme::kDesktop, Qt::CaseInsensitive))
+        return true;
+
+    return false;
 }
 
 bool FileUtils::isDesktopFileSuffix(const QUrl &url)
@@ -278,28 +263,33 @@ bool FileUtils::isDesktopFileSuffix(const QUrl &url)
     // but there are interfaces that call "isDesktopFile"
     // so often that it would be a performance loss to
     // create a fileinfo
-    return url.toString().endsWith(".desktop");
+    if (!url.toString().endsWith(".desktop"))
+        return false;
+    return !ProtocolUtils::isRemoteFile(url);
 }
 
 bool FileUtils::isDesktopFileInfo(const FileInfoPointer &info)
 {
     Q_ASSERT(info);
     const QString &suffix = info->nameOf(NameInfoType::kSuffix);
-    if (suffix == DFMBASE_NAMESPACE::Global::Scheme::kDesktop
-        || info->urlOf(UrlInfoType::kParentUrl).path() == StandardPaths::location(StandardPaths::StandardLocation::kDesktopPath)
-        || info->extendAttributes(ExtInfoType::kFileLocalDevice).toBool()) {
-        const QUrl &url = info->urlOf(UrlInfoType::kUrl);
-        QMimeType type = info->fileMimeType();
-        if (!type.isValid())
-            type = DMimeDatabase().mimeTypeForFile(url.path(), QMimeDatabase::MatchDefault, QString());
+    if (suffix == DFMBASE_NAMESPACE::Global::Scheme::kDesktop)
+        return !info->isAttributes(OptInfoType::kIsDir);
 
-        // QMimeType::suffixes is not the same as fileinfo's `kSuffix`.
-        if (type.name() == "application/x-desktop"
-            && type.suffixes().contains(DFMBASE_NAMESPACE::Global::Scheme::kDesktop, Qt::CaseInsensitive))
+    if ((info->urlOf(UrlInfoType::kParentUrl).path() == StandardPaths::location(StandardPaths::StandardLocation::kDesktopPath)
+         || info->extendAttributes(ExtInfoType::kFileLocalDevice).toBool())
+        && info->isAttributes(OptInfoType::kIsSymLink)) {
+        const QString &target = info->pathOf(PathInfoType::kSymLinkTarget);
+        if (target.endsWith(QString(".") + DFMBASE_NAMESPACE::Global::Scheme::kDesktop, Qt::CaseInsensitive))
             return true;
     }
 
     return false;
+}
+
+void FileUtils::refreshIconCache()
+{
+    // https://bugreports.qt.io/browse/QTBUG-112257
+    QIcon::setThemeSearchPaths(QIcon::themeSearchPaths());
 }
 
 bool FileUtils::isTrashDesktopFile(const QUrl &url)
@@ -329,16 +319,27 @@ bool FileUtils::isHomeDesktopFile(const QUrl &url)
     return false;
 }
 
+bool FileUtils::isSameMountPoint(const QUrl &url1, const QUrl &url2)
+{
+    if (!url1.isLocalFile())
+        return false;
+
+    if (url1.scheme() != url2.scheme())
+        return false;
+
+    return DFMIO::DFMUtils::mountPathFromUrl(url1) == DFMIO::DFMUtils::mountPathFromUrl(url2);
+}
+
 bool FileUtils::isSameDevice(const QUrl &url1, const QUrl &url2)
 {
     if (url1.scheme() != url2.scheme())
         return false;
 
-    if (isLocalFile(url1)) {
+    if (url1.isLocalFile()) {
         return DFMIO::DFMUtils::devicePathFromUrl(url1) == DFMIO::DFMUtils::devicePathFromUrl(url2);
     }
 
-    return url1.host() == url2.host() && url1.port() == url1.port();
+    return url1.host() == url2.host() && url1.port() == url2.port();
 }
 
 bool FileUtils::isSameFile(const QUrl &url1, const QUrl &url2, const Global::CreateFileInfoType infoCache)
@@ -351,36 +352,25 @@ bool FileUtils::isSameFile(const QUrl &url1, const QUrl &url2, const Global::Cre
     if (!info1 || !info2)
         return false;
 
-    struct stat statFromInfo;
-    struct stat statToInfo;
-
     const QString &path1 = info1->pathOf(PathInfoType::kAbsoluteFilePath);
     const QString &path2 = info2->pathOf(PathInfoType::kAbsoluteFilePath);
-    int fromStat = stat(path1.toLocal8Bit().data(), &statFromInfo);
-    int toStat = stat(path2.toLocal8Bit().data(), &statToInfo);
-    if (0 == fromStat && 0 == toStat) {
-        // 通过inode判断是否是同一个文件
-        if (statFromInfo.st_ino == statToInfo.st_ino
-            && statFromInfo.st_dev == statToInfo.st_dev) {   //! 需要判断设备号
-            return true;
-        }
-    }
-    return false;
+
+    return isSameFile(path1, path2);
 }
 
-bool FileUtils::isLocalDevice(const QUrl &url)
+bool FileUtils::isSameFile(const QString &path1, const QString &path2)
 {
-    //return !DFMIO::DFMUtils::fileIsRemovable(url) && !isGvfsFile(url);
-    if (isGvfsFile(url))
-        return false;
+    struct stat stat1;
+    struct stat stat2;
+    int ret1 = stat(path1.toLocal8Bit().data(), &stat1);
+    int ret2 = stat(path2.toLocal8Bit().data(), &stat2);
+    if (0 == ret1 && 0 == ret2) {
+        // 通过inode判断是否是同一个文件
+        return (stat1.st_ino == stat2.st_ino
+                && stat1.st_dev == stat2.st_dev);   //! 需要判断设备号
+    }
 
-    if (DeviceUtils::isExternalBlock(url))
-        return false;
-
-    if (DevProxyMng->isFileOfProtocolMounts(url.path()))
-        return false;
-
-    return true;
+    return false;
 }
 
 bool FileUtils::isCdRomDevice(const QUrl &url)
@@ -390,6 +380,10 @@ bool FileUtils::isCdRomDevice(const QUrl &url)
 
 bool FileUtils::trashIsEmpty()
 {
+    if (NetworkUtils::instance()->checkAllCIFSBusy()) {
+        return true;
+    }
+
     // not use cache, because some times info unreliable, such as watcher inited temporality
     auto info = InfoFactory::create<FileInfo>(trashRootUrl(), Global::CreateFileInfoType::kCreateFileInfoSync);
     if (info) {
@@ -398,11 +392,22 @@ bool FileUtils::trashIsEmpty()
     return true;
 }
 
+FileUtils::TrashEmptyState FileUtils::trashEmptyState()
+{
+    return static_cast<TrashEmptyState>(kTrashEmptyState.load());
+}
+
+void FileUtils::setTrashEmptyState(TrashEmptyState state)
+{
+    kTrashEmptyState.store(static_cast<int>(state));
+}
+
 QUrl FileUtils::trashRootUrl()
 {
     QUrl url;
     url.setScheme(DFMBASE_NAMESPACE::Global::Scheme::kTrash);
     url.setPath("/");
+    url.setHost("");
     return url;
 }
 
@@ -443,22 +448,6 @@ bool FileUtils::isHigherHierarchy(const QUrl &urlBase, const QUrl &urlCompare)
     return false;
 }
 
-bool FileUtils::isLocalFile(const QUrl &url)
-{
-    if (url.isLocalFile())
-        return true;
-
-    // see if the original path is from local.
-    // since only ext* filesystems are supported to mounted with dlnfs,
-    // check the url by udisks.
-    // the dlnfs mount is captured by gvfs and is regarded as protocol device.
-    // so if it's NOT external block mounts file, it's local file.
-    if (DeviceUtils::isSubpathOfDlnfs(url.path()))
-        return !(DevProxyMng->isFileOfExternalBlockMounts(url.path()));
-
-    return false;
-}
-
 /*!
  * \brief FileUtils::getFileNameLength, if the `url` is suburl of dlnfs mountpoint, then use char count rather than byte count to judge filename length.
  * \param url
@@ -486,7 +475,7 @@ QMap<QUrl, QUrl> FileUtils::fileBatchReplaceText(const QList<QUrl> &originUrls, 
 
         bool isDesktopApp = info->nameOf(NameInfoType::kMimeTypeName).contains(Global::Mime::kTypeAppDesktop);
 
-        ///###: symlink is also processed here.
+        /// ###: symlink is also processed here.
         const QString &suffix = info->nameOf(NameInfoType::kSuffix).isEmpty()
                 ? QString()
                 : QString(".") + info->nameOf(NameInfoType::kSuffix);
@@ -501,7 +490,7 @@ QMap<QUrl, QUrl> FileUtils::fileBatchReplaceText(const QList<QUrl> &originUrls, 
         fileBaseName.replace(pair.first, pair.second);
 
         if (fileBaseName.trimmed().isEmpty()) {
-            qCWarning(logDFMBase) << "replace fileBaseName(not include suffix) trimmed is empty string";
+            qCWarning(logDFMBase) << "File batch replace text failed: resulting basename is empty for URL:" << url;
             continue;
         }
 
@@ -515,6 +504,10 @@ QMap<QUrl, QUrl> FileUtils::fileBatchReplaceText(const QList<QUrl> &originUrls, 
 
         if (changedUrl != url)
             result.insert(url, changedUrl);
+
+        if (isDesktopApp) {
+            qCDebug(logDFMBase) << "Desktop app batch rename:" << fileBaseName << "for path:" << info->urlOf(UrlInfoType::kUrl);
+        }
     }
 
     return result;
@@ -574,14 +567,14 @@ QMap<QUrl, QUrl> FileUtils::fileBatchAddText(const QList<QUrl> &originUrls, cons
 
 QMap<QUrl, QUrl> FileUtils::fileBatchCustomText(const QList<QUrl> &originUrls, const QPair<QString, QString> &pair)
 {
-    if (originUrls.isEmpty() || pair.first.isEmpty() || pair.second.isEmpty()) {   //###: here, jundge whether there are fileUrls in originUrls.
+    if (originUrls.isEmpty() || pair.first.isEmpty() || pair.second.isEmpty()) {   // ###: here, jundge whether there are fileUrls in originUrls.
         return QMap<QUrl, QUrl> {};
     }
 
     unsigned long long serialNumber { pair.second.toULongLong() };
     unsigned long long index { 0 };
 
-    if (serialNumber == ULONG_LONG_MAX) {   //##: Maybe, this value will be equal to the max value of the type of unsigned long long
+    if (serialNumber == ULONG_LONG_MAX) {   // ##: Maybe, this value will be equal to the max value of the type of unsigned long long
         index = serialNumber - originUrls.size();
     } else {
         index = serialNumber;
@@ -620,8 +613,7 @@ QMap<QUrl, QUrl> FileUtils::fileBatchCustomText(const QList<QUrl> &originUrls, c
             needRecombination = true;
 
         if (isDesktopApp) {
-            qCDebug(logDFMBase) << "this is desktop app case,file name will be changed as { "
-                                << fileBaseName << " } for path:" << info->urlOf(UrlInfoType::kUrl);
+            qCDebug(logDFMBase) << "Desktop app custom rename:" << fileBaseName << "for path:" << info->urlOf(UrlInfoType::kUrl);
         }
 
         ++index;
@@ -668,8 +660,12 @@ QString FileUtils::cutFileName(const QString &name, int maxLength, bool useCharC
 
     tmpName.clear();
     int bytes = 0;
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     auto codec = QTextCodec::codecForLocale();
-
+#else
+    auto encoder = QStringEncoder(QStringEncoder::System);
+    auto decoder = QStringDecoder(QStringEncoder::System);
+#endif
     for (int i = 0; i < name.size(); ++i) {
         const QChar &ch = name.at(i);
         QByteArray data;
@@ -682,18 +678,32 @@ QString FileUtils::cutFileName(const QString &name, int maxLength, bool useCharC
             const QChar &nextCh = name.at(i);
             if (!ch.isHighSurrogate() || !nextCh.isLowSurrogate())
                 break;
-
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
             data = codec->fromUnicode(name.data() + i - 1, 2);
+#else
+            data = encoder.encode(QString(name.data() + i - 1, 2));
+#endif
             fullChar.setUnicode(name.data() + i - 1, 2);
         } else {
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
             data = codec->fromUnicode(name.data() + i, 1);
+#else
+            data = encoder.encode(QString(name.data() + i, 1));
+#endif
             fullChar.setUnicode(name.data() + i, 1);
         }
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
         if (codec->toUnicode(data) != fullChar) {
-            qCWarning(logDFMBase) << "Failed convert" << fullChar << "to" << codec->name() << "coding";
+            qCWarning(logDFMBase) << "Character encoding conversion failed for character:" << fullChar << "to codec:" << codec->name();
             continue;
         }
+#else
+        if (decoder.decode(data) != fullChar) {
+            qCWarning(logDFMBase) << "Character encoding conversion failed for character:" << fullChar << "to data:" << data;
+            continue;
+        }
+#endif
 
         bytes += data.size();
         if (bytes > maxLength)
@@ -707,80 +717,21 @@ QString FileUtils::cutFileName(const QString &name, int maxLength, bool useCharC
     return tmpName;
 }
 
-QString FileUtils::nonExistSymlinkFileName(const QUrl &fileUrl, const QUrl &parentUrl)
-{
-    const FileInfoPointer &info = InfoFactory::create<FileInfo>(fileUrl);
-
-    if (info && DFMIO::DFile(fileUrl).exists()) {
-        QString baseName = info->displayOf(DisPlayInfoType::kFileDisplayName) == info->nameOf(NameInfoType::kFileName)
-                ? info->nameOf(NameInfoType::kBaseName)
-                : info->displayOf(DisPlayInfoType::kFileDisplayName);
-        QString shortcut = QObject::tr("Shortcut");
-        QString linkBaseName;
-
-        int number = 0;
-
-        forever {
-            if (info->isAttributes(OptInfoType::kIsFile)) {
-                if (info->nameOf(NameInfoType::kSuffix).isEmpty()) {
-                    if (number == 0) {
-                        linkBaseName = QString("%1 %2").arg(baseName, shortcut);
-                    } else {
-                        linkBaseName = QString("%1 %2%3").arg(baseName, shortcut, QString::number(number));
-                    }
-                } else {
-                    if (number == 0) {
-                        linkBaseName = QString("%1 %2.%3").arg(baseName, shortcut, info->nameOf(NameInfoType::kSuffix));
-                    } else {
-                        linkBaseName = QString("%1 %2%3.%4").arg(baseName, shortcut, QString::number(number), info->nameOf(NameInfoType::kSuffix));
-                    }
-                }
-            } else if (info->isAttributes(OptInfoType::kIsDir)) {
-                if (number == 0) {
-                    linkBaseName = QString("%1 %2").arg(baseName, shortcut);
-                } else {
-                    linkBaseName = QString("%1 %2%3").arg(baseName, shortcut, QString::number(number));
-                }
-            } else if (info->isAttributes(OptInfoType::kIsSymLink)) {
-                return QString();
-            }
-
-            if (parentUrl.isEmpty()) {
-                return linkBaseName;
-            }
-
-            QDir parentDir = QDir(parentUrl.path());
-            if (parentDir.exists(linkBaseName)) {
-                ++number;
-            } else {
-                //链接文件失效后exists会返回false，通过lstat再次判断链接文件本身是否存在
-                auto strLinkPath = parentDir.filePath(linkBaseName).toStdString();
-                struct stat st;
-                if ((lstat(strLinkPath.c_str(), &st) == 0) && S_ISLNK(st.st_mode))
-                    ++number;
-                else
-                    return linkBaseName;
-            }
-        }
-    }
-
-    return QString();
-}
-
 QString FileUtils::toUnicode(const QByteArray &data, const QString &fileName)
 {
     if (data.isEmpty())
         return QString();
-
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     const QByteArray &encoding = detectCharset(data, fileName);
 
     if (QTextCodec *codec = QTextCodec::codecForName(encoding)) {
         return codec->toUnicode(data);
     }
-
+#endif
     return QString::fromLocal8Bit(data);
 }
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 QByteArray FileUtils::detectCharset(const QByteArray &data, const QString &fileName)
 {
     // Return local encoding if nothing in file.
@@ -946,6 +897,7 @@ QByteArray FileUtils::detectCharset(const QByteArray &data, const QString &fileN
 
     return encoding;
 }
+#endif
 
 /*!
  * \brief FileUtils::getMemoryPageSize 获取当前內存页大小
@@ -982,16 +934,19 @@ bool FileUtils::containsCopyingFileUrl(const QUrl &url)
     return copyingUrl.contains(url);
 }
 
-// TODO: remot it!
 void FileUtils::notifyFileChangeManual(DFMGLOBAL_NAMESPACE::FileNotifyType type, const QUrl &url)
 {
     if (!url.isValid())
         return;
 
     auto isRemoteMount = [=](const QUrl &url) -> bool {
-        if (DeviceUtils::isSamba(url))
+        if (ProtocolUtils::isSMBFile(url))
             return true;
-        if (DeviceUtils::isFtp(url))
+        if (ProtocolUtils::isFTPFile(url))
+            return true;
+        if (ProtocolUtils::isNFSFile(url))
+            return true;
+        if (ProtocolUtils::isDavFile(url) || ProtocolUtils::isDavsFile(url))
             return true;
 
         return false;
@@ -1004,7 +959,7 @@ void FileUtils::notifyFileChangeManual(DFMGLOBAL_NAMESPACE::FileNotifyType type,
     if (!urlParent.isValid())
         return;
 
-    AbstractFileWatcherPointer watcher = WatcherFactory::create<AbstractFileWatcher>(DFMIO::DFMUtils::directParentUrl(url));
+    AbstractFileWatcherPointer watcher = WatcherFactory::create<AbstractFileWatcher>(urlParent);
     if (!watcher)
         return;
 
@@ -1022,128 +977,126 @@ void FileUtils::notifyFileChangeManual(DFMGLOBAL_NAMESPACE::FileNotifyType type,
         return;
     }
 }
-//fix 多线程排序时，该处的全局变量在compareByString函数中可能导致软件崩溃
-//QCollator sortCollator;
-class DCollator : public QCollator
+
+QString FileUtils::symlinkTarget(const QUrl &url)
 {
-public:
-    DCollator()
-        : QCollator()
-    {
-        setNumericMode(true);
-        setCaseSensitivity(Qt::CaseInsensitive);
+    char buffer[4096] { 0 };
+    auto size = readlink(url.path().toStdString().c_str(), buffer, sizeof(buffer));
+    if (size > 0)
+        return QString::fromUtf8(buffer, static_cast<int>(size));
+    return QString();
+}
+
+QString FileUtils::resolveSymlink(const QUrl &url)
+{
+    QSet<QString> visited;
+    QString target = symlinkTarget(url);
+    while (!target.isEmpty()) {
+        if (visited.contains(target))
+            return QString();   // Cycle detected: return empty
+        visited.insert(target);
+        QUrl newUrl = QUrl::fromLocalFile(target);
+        QString nextTarget = symlinkTarget(newUrl);
+        if (nextTarget.isEmpty())
+            break;
+        target = nextTarget;
     }
-};
-
-bool FileUtils::isNumOrChar(const QChar ch)
-{
-    return (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122);
+    return target;
 }
 
-bool FileUtils::isNumber(const QChar ch)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+/**
+   @brief 转换图片颜色空间到sRGB，解决CMYK等颜色空间图片显示颜色不正确的问题
+   @param image 原始图片
+   @return 转换后的图片，如果不需要转换或转换失败则返回原图
+   @note 此功能仅在Qt6中可用
+ */
+QImage FileUtils::convertToSRgbColorSpace(const QImage &image)
 {
-    return (ch >= 48 && ch <= 57);
-}
+    if (image.isNull())
+        return image;
 
-bool FileUtils::isSymbol(const QChar ch)
-{
-    return ch.script() != QChar::Script_Han && !isNumOrChar(ch);
-}
+    QColorSpace srgbColorSpace = QColorSpace::SRgb;
+    bool needsConversion = false;
+    if (image.colorSpace().isValid()) {
+        qCDebug(logDFMBase) << "Image has color space:" << image.colorSpace().description();
 
-QString FileUtils::numberStr(const QString &str, int pos)
-{
-    QString tmp;
-    auto total = str.length();
-
-    while (pos > 0 && isNumber(str.at(pos))) {
-        pos--;
-    }
-
-    if (!isNumber(str.at(pos)))
-        pos++;
-
-    while (pos < total && isNumber(str.at(pos))) {
-        tmp += str.at(pos);
-        pos++;
-    }
-
-    return tmp;
-}
-
-// 升序，第一个小，true
-bool FileUtils::compareByStringEx(const QString &str1, const QString &str2)
-{
-    thread_local static DCollator sortCollator;
-    QString suf1 = str1.right(str1.length() - str1.lastIndexOf(".") - 1);
-    QString suf2 = str2.right(str2.length() - str2.lastIndexOf(".") - 1);
-    QString name1 = str1.left(str1.lastIndexOf("."));
-    QString name2 = str2.left(str2.lastIndexOf("."));
-    int length1 = name1.length();
-    int length2 = name2.length();
-    auto total = length1 > length2 ? length2 : length1;
-
-    bool preIsNum = false;
-    bool isSybol1 = false, isSybol2 = false, isHanzi1 = false,
-         isHanzi2 = false, isNumb1 = false, isNumb2 = false;
-    for (int i = 0; i < total; ++i) {
-        // 判断相等和大小写相等，跳过
-        if (str1.at(i) == str2.at(i) || str1.at(i).toLower() == str2.at(i).toLower()) {
-            preIsNum = isNumber(str1.at(i));
-            continue;
+        if (image.colorSpace() != srgbColorSpace) {
+            needsConversion = true;
+            qCDebug(logDFMBase) << "Converting color space from" << image.colorSpace().description()
+                                << "to sRGB";
         }
-        isNumb1 = isNumber(str1.at(i));
-        isNumb2 = isNumber(str2.at(i));
-        if ((preIsNum && (isNumb1 ^ isNumb2)) || (isNumb1 && isNumb2)) {
-            // 取后面几位的数字作比较后面的数字,先比较位数
-            // 位数大的大
-            auto str1n = numberStr(str1, preIsNum ? i - 1 : i).toUInt();
-            auto str2n = numberStr(str2, preIsNum ? i - 1 : i).toUInt();
-            if (str1n == str2n)
-                return str1.at(i) < str2.at(i);
-            return str1n < str2n;
+    } else {
+        qCDebug(logDFMBase) << "Image has no valid color space, checking format for potential CMYK";
+        if (image.format() == QImage::Format_CMYK8888) {
+            needsConversion = true;
+            qCDebug(logDFMBase) << "CMYK format detected, attempting conversion";
+        }
+    }
+
+    if (!needsConversion) {
+        qCDebug(logDFMBase) << "No color space conversion needed";
+        return image;
+    }
+
+    QImage convertedImage = QImage();
+    try {
+        convertedImage = image.convertedToColorSpace(srgbColorSpace);
+        if (!convertedImage.isNull()) {
+            qCDebug(logDFMBase) << "Color space conversion method 1 (convertedToColorSpace) succeeded";
+        } else {
+            qCDebug(logDFMBase) << "Color space conversion method 1 failed";
+        }
+    } catch (...) {
+        qCDebug(logDFMBase) << "Color space conversion method 1 threw exception";
+    }
+
+    if (convertedImage.isNull()) {
+        qCDebug(logDFMBase) << "Trying color space conversion method 2: manual color space setting";
+
+        convertedImage = image.copy();
+        convertedImage.setColorSpace(srgbColorSpace);
+
+        if (convertedImage.format() != QImage::Format_RGB888 && convertedImage.format() != QImage::Format_ARGB32 && convertedImage.format() != QImage::Format_ARGB32_Premultiplied) {
+            convertedImage = convertedImage.convertToFormat(QImage::Format_RGB888);
         }
 
-        // 判断特殊字符就排到最后
-        isSybol1 = isSymbol(str1.at(i));
-        isSybol2 = isSymbol(str2.at(i));
-        if (isSybol1 ^ isSybol2)
-            return !isSybol1;
-
-        if (isSybol1)
-            return str1.at(i) < str2.at(i);
-
-        // 判断汉字
-        isHanzi1 = str1.at(i).script() == QChar::Script_Han;
-        isHanzi2 = str2.at(i).script() == QChar::Script_Han;
-        if (isHanzi2 ^ isHanzi1)
-            return !isHanzi1;
-
-        if (isHanzi1)
-            return sortCollator.compare(str1.at(i), str2.at(i)) < 0;
-
-        // 判断数字或者字符
-        if (!isNumb1 && !isNumb2)
-            return str1.at(i).toLower() < str2.at(i).toLower();
-
-        return isNumb1;
+        if (!convertedImage.isNull()) {
+            qCDebug(logDFMBase) << "Color space conversion method 2 succeeded";
+        }
     }
 
-    if (length1 == length2) {
-        if (suf1.isEmpty() ^ suf2.isEmpty())
-            return suf1.isEmpty();
+    if (convertedImage.isNull()) {
+        qCDebug(logDFMBase) << "Trying color space conversion method 3: basic format conversion";
+        convertedImage = image.convertToFormat(QImage::Format_RGB888);
+        convertedImage.setColorSpace(srgbColorSpace);
 
-        if (suf2.startsWith(suf1) ^ suf1.startsWith(suf2))
-            return suf2.startsWith(suf1);
-
-        return suf1 < suf2;
+        if (!convertedImage.isNull()) {
+            qCDebug(logDFMBase) << "Color space conversion method 3 succeeded";
+        }
     }
 
-    return length1 < length2;
+    if (convertedImage.isNull()) {
+        qCWarning(logDFMBase) << "All color space conversion methods failed, returning original image";
+        return image;
+    }
+
+    return convertedImage;
+}
+#endif
+
+QString FileUtils::encryptString(const QString &str)
+{
+    QByteArray byteArray = str.toUtf8();
+    QByteArray encodedByteArray = byteArray.toBase64();
+    return QString::fromUtf8(encodedByteArray);
 }
 
-bool FileUtils::compareString(const QString &str1, const QString &str2, Qt::SortOrder order)
+QString FileUtils::decryptString(const QString &str)
 {
-    return !((order == Qt::AscendingOrder) ^ compareByStringEx(str1, str2));
+    QByteArray encodedByteArray = str.toUtf8();
+    QByteArray decodedByteArray = QByteArray::fromBase64(encodedByteArray);
+    return QString::fromUtf8(decodedByteArray);
 }
 
 QString FileUtils::dateTimeFormat()
@@ -1161,7 +1114,7 @@ bool FileUtils::setBackGround(const QString &pictureFilePath)
                          QString("dde-file-manager"),   // icon
                          QObject::tr("This system wallpaper is locked. Please contact your admin."),
                          QString(), QStringList(), QVariantMap(), 5000);
-        qCInfo(logDFMBase) << "wallpaper is locked..";
+        qCInfo(logDFMBase) << "Wallpaper change blocked: system wallpaper is locked";
         return false;
     }
 
@@ -1171,7 +1124,7 @@ bool FileUtils::setBackGround(const QString &pictureFilePath)
                                                           "Set");
     message.setArguments({ "greeterbackground", pictureFilePath });
     QDBusConnection::sessionBus().asyncCall(message);
-    qCInfo(logDFMBase) << "setgreeterbackground calls Appearance Set";
+    qCInfo(logDFMBase) << "Setting greeter background via Appearance service:" << pictureFilePath;
 
     QDBusMessage msgIntrospect = QDBusMessage::createMethodCall(APPEARANCE_SERVICE,
                                                                 APPEARANCE_PATH,
@@ -1191,7 +1144,7 @@ bool FileUtils::setBackGround(const QString &pictureFilePath)
             const QString screen = qApp->primaryScreen()->name();
             msg.setArguments({ screen, pictureFilePath });
             QDBusConnection::sessionBus().asyncCall(msg);
-            qCInfo(logDFMBase) << "setBackground calls Appearance SetMonitorBackground" << screen;
+            qCInfo(logDFMBase) << "Setting monitor background via Appearance service for screen:" << screen << "path:" << pictureFilePath;
             return true;
         }
     }
@@ -1202,54 +1155,9 @@ bool FileUtils::setBackGround(const QString &pictureFilePath)
                                                       "Set");
     msg.setArguments({ "Background", pictureFilePath });
     QDBusConnection::sessionBus().asyncCall(msg);
-    qCInfo(logDFMBase) << "setBackground calls Appearance Set";
+    qCInfo(logDFMBase) << "Setting background via Appearance service:" << pictureFilePath;
 
     return true;
-}
-
-QString FileUtils::nonExistFileName(FileInfoPointer fromInfo, FileInfoPointer targetDir)
-{
-    if (!targetDir || !DFMIO::DFile(targetDir->urlOf(UrlInfoType::kUrl)).exists()) {
-        return QString();
-    }
-
-    if (!targetDir->isAttributes(OptInfoType::kIsDir)) {
-        return QString();
-    }
-
-    const QString &copySuffix = QObject::tr(" (copy)", "this should be translated in Noun version rather Verb, the first space should be ignore if translate to Chinese");
-    const QString &copySuffix2 = QObject::tr(" (copy %1)", "this should be translated in Noun version rather Verb, the first space should be ignore if translate to Chinese");
-
-    QString fileBaseName = fromInfo->nameOf(NameInfoType::kCompleteBaseName);
-    QString suffix = fromInfo->nameOf(NameInfoType::kSuffix);
-    QString fileName = fromInfo->nameOf(NameInfoType::kFileName);
-    //在7z分卷压缩后的名称特殊处理7z.003
-    const QString &reg = ".7z.[0-9]{3,10}$";
-    if (fileName.contains(QRegularExpression(reg))) {
-        const int &index = fileName.indexOf(QRegularExpression(reg));
-        fileBaseName = fileName.left(index);
-        suffix = fileName.mid(index + 1);
-    }
-
-    int number = 0;
-    QString newFileName;
-
-    QUrl newUrl = targetDir->urlOf(UrlInfoType::kUrl);
-
-    do {
-        auto nameSuffix = number > 0 ? copySuffix2.arg(number) : copySuffix;
-        newFileName = QString("%1%2").arg(fileBaseName, nameSuffix);
-
-        if (!suffix.isEmpty()) {
-            newFileName.append('.').append(suffix);
-        }
-
-        ++number;
-        newUrl = targetDir->urlOf(UrlInfoType::kUrl);
-        newUrl.setPath(newUrl.path() + "/" + newFileName);
-    } while (DFMIO::DFile(newUrl).exists());
-
-    return newFileName;
 }
 
 QString FileUtils::bindPathTransform(const QString &path, bool toDevice)
@@ -1267,26 +1175,57 @@ int FileUtils::dirFfileCount(const QUrl &url)
 
 bool FileUtils::fileCanTrash(const QUrl &url)
 {
-    // gio does not support root user to move ordinary user files to trash
-    auto info = InfoFactory::create<FileInfo>(url);
-    if (SysInfoUtils::isRootUser()) {
-        int ownerId = info.isNull() ? -1 : info->extendAttributes(FileInfo::FileExtendedInfoType::kOwnerId).toInt();
-        if (ownerId != 0)
-            return false;
+    auto info = InfoFactory::create<FileInfo>(url, Global::CreateFileInfoType::kCreateFileInfoSync);
+    if (!info) {
+        qCWarning(logDFMBase) << "Failed to create file info for URL:" << url;
+        return false;
     }
 
-    // 获取当前配置
-    bool alltotrash = DConfigManager::instance()->value(kDefaultCfgPath, kFileAllTrash).toBool();
-    if (!alltotrash)
-        return info ? info->extendAttributes(ExtInfoType::kFileLocalDevice).toBool() : isLocalDevice(url);
-    if (!url.isValid())
-        return false;
+    // gio does not support root user to move ordinary user files to trash
+    if (SysInfoUtils::isRootUser()) {
+        int currentEffectiveUid = SysInfoUtils::getUserId();
+        int ownerId = info->extendAttributes(FileInfo::FileExtendedInfoType::kOwnerId).toInt();
+        if (ownerId != currentEffectiveUid) {
+            qCWarning(logDFMBase) << "A root process is trying to trash a non-root file, predicting failure.";
+            return false;
+        }
+    }
 
-    const QString &path = url.toLocalFile();
-    static const QString gvfsMatch { "(^/run/user/\\d+/gvfs/|^/root/.gvfs/)" };
-    QRegularExpression re { gvfsMatch };
-    QRegularExpressionMatch match { re.match(path) };
-    return !match.hasMatch();
+    // 检查文件是否位于原始用户的“领域”（主目录）内
+    if (SysInfoUtils::isOpenAsAdmin()) {
+        const QString &originalHomePath = SysInfoUtils::getOriginalUserHome();
+        const QString &canonicalFilePath = info->pathOf(PathInfoType::kCanonicalPath);   // 获取文件所在目录的规范路径
+        if (originalHomePath.isEmpty() || canonicalFilePath.isEmpty()) {
+            qCWarning(logDFMBase) << "Invalid path detected: originalHomePath or canonicalFilePath is empty.";
+            return false;   // 路径无效
+        }
+
+        // Use more reliable path comparison to handle symlinks and mount points
+        QString normalizedOriginalHome = QDir::cleanPath(originalHomePath);
+        QString normalizedFilePath = QDir::cleanPath(canonicalFilePath);
+
+        // Ensure proper path boundary comparison
+        if (!normalizedOriginalHome.endsWith('/')) {
+            normalizedOriginalHome += '/';
+        }
+
+        // Check if file is within the original user's home directory
+        bool isInHomeDir = (normalizedFilePath.startsWith(normalizedOriginalHome) || normalizedFilePath == normalizedOriginalHome.chopped(1));
+
+        if (isInHomeDir) {
+            // 文件位于原始用户的主目录中。
+            // 这是 GIO 会拒绝的“领域冲突”场景。
+            qCWarning(logDFMBase) << " A root process is trying to trash a file inside another user's home directory ("
+                                  << url << "). Predicting GIO failure.";
+            return false;
+        }
+    }
+
+    bool alltotrash = DConfigManager::instance()->value(kDefaultCfgPath, kFileAllTrash).toBool();
+    if (alltotrash)
+        return info->canAttributes(CanableInfoType::kCanTrash);
+
+    return ProtocolUtils::isLocalFile(url) && info->canAttributes(CanableInfoType::kCanTrash);
 }
 
 QUrl FileUtils::bindUrlTransform(const QUrl &url)
@@ -1298,9 +1237,13 @@ QUrl FileUtils::bindUrlTransform(const QUrl &url)
         return tmp;
     }
 
-    auto path = FileUtils::trashPathToNormal(url.path());
-    path = FileUtils::bindPathTransform(path, false);
-    path = FileUtils::normalPathToTrash(path);
+    auto normalPath = FileUtils::trashPathToNormal(url.path());
+    auto transformedPath = FileUtils::bindPathTransform(normalPath, false);
+
+    if (transformedPath == normalPath)
+        return url;
+
+    auto path = FileUtils::normalPathToTrash(transformedPath);
     tmp.setPath(path);
     return tmp;
 }
@@ -1318,6 +1261,8 @@ QString FileUtils::trashPathToNormal(const QString &trash)
 QString FileUtils::normalPathToTrash(const QString &normal)
 {
     QString trash = normal;
+    while (trash.startsWith("/"))
+        trash = trash.mid(1);
     trash = trash.replace("/", "\\");
     trash.push_front("/");
     return trash;
@@ -1326,7 +1271,7 @@ QString FileUtils::normalPathToTrash(const QString &normal)
 bool FileUtils::supportLongName(const QUrl &url)
 {
     const static QList<QString> datas {
-        "vfat", "exfat", "ntfs", "fuseblk", "fuse.dlnfs"
+        "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "fuse.dlnfs", "udf", "ulnfs"
     };
 
     const QString &fileSystem = dfmio::DFMUtils::fsTypeFromUrl(url);
@@ -1351,8 +1296,9 @@ QUrl DesktopAppUrl::homeDesktopFileUrl()
     return home;
 }
 
-///###: Do not modify it.
-///###: it's auxiliary.
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+/// ###: Do not modify it.
+/// ###: it's auxiliary.
 float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, const QLocale::Country &country)
 {
     qreal hepCount = 0;
@@ -1442,65 +1388,53 @@ float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, co
 
     return qMax(0.0f, c);
 }
+#endif
 
-Match::Match(const QString &group)
+QString FileUtils::findIconFromXdg(const QString &iconName)
 {
-    for (const QString &key : Application::instance()->genericObtuselySetting()->keys(group)) {
-        const QString &value = Application::instance()->genericObtuselySetting()->value(group, key).toString();
+    // NOTE: qtxdg-dev-tools only Qt5 supported now!
+    if (!QStandardPaths::findExecutable("qtxdg-iconfinder").isEmpty()) {
+        QProcess process;
+        process.start("qtxdg-iconfinder", QStringList() << iconName);
+        process.closeWriteChannel();
+        process.waitForFinished();
 
-        int last_dir_split = value.lastIndexOf(QDir::separator());
+        QString outputTxt = process.readAllStandardOutput();
+        QStringList list = outputTxt.split("\n");
 
-        if (last_dir_split >= 0) {
-            QString path = value.left(last_dir_split);
+        if (list.size() > 3) {
+            // Remove unnecessary lines
+            list.removeFirst();
+            list.removeLast();
+            list.removeLast();
 
-            if (path.startsWith("~/")) {
-                path.replace(0, 1, QDir::homePath());
-            }
-
-            patternList << qMakePair(path, value.mid(last_dir_split + 1));
-        } else {
-            patternList << qMakePair(QString(), value);
+            return list.first().simplified();
         }
+
+        return QString();
+    } else {
+        qCWarning(logDFMBase) << "qtxdg-iconfinder not found";
+        return QString();
     }
 }
 
-bool Match::match(const QString &path, const QString &name)
+bool FileUtils::isDefaultHiddenFile(const QUrl &fileUrl)
 {
-    // 这里可能会析构 先复制一份再循环
-    const QList<QPair<QString, QString>> patternListNew = patternList;
-    for (auto pattern : patternListNew) {
-        QRegularExpression re(QString(), QRegularExpression::MultilineOption);
-
-        if (!pattern.first.isEmpty()) {
-            re.setPattern(pattern.first);
-
-            if (!re.isValid()) {
-                qCWarning(logDFMBase) << re.errorString();
-                continue;
-            }
-
-            if (!re.match(path).hasMatch()) {
-                continue;
+    static DThreadList<QUrl> defaultHiddenUrls;
+    static std::once_flag flg;
+    std::call_once(flg, [&] {
+        using namespace GlobalServerDefines;
+        const auto &systemBlks = DevProxyMng->getAllBlockIds(DeviceQueryOption::kSystem | DeviceQueryOption::kMounted);
+        for (const auto &blk : systemBlks) {
+            auto blkInfo = DevProxyMng->queryBlockInfo(blk);
+            const QStringList &mountPoints = blkInfo.value(DeviceProperty::kMountPoints).toStringList();
+            for (const auto &mpt : mountPoints) {
+                defaultHiddenUrls.push_backByLock(QUrl::fromLocalFile(mpt + (mpt == "/" ? "root" : "/root")));
+                defaultHiddenUrls.push_backByLock(QUrl::fromLocalFile(mpt + (mpt == "/" ? "lost+found" : "/lost+found")));
             }
         }
-
-        if (pattern.second.isEmpty()) {
-            return true;
-        }
-
-        re.setPattern(pattern.second);
-
-        if (!re.isValid()) {
-            qCWarning(logDFMBase) << re.errorString();
-            continue;
-        }
-
-        if (re.match(name).hasMatch()) {
-            return true;
-        }
-    }
-
-    return false;
+    });
+    return defaultHiddenUrls.containsByLock(fileUrl);
 }
 
 }

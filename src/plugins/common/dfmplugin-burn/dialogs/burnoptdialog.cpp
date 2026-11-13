@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,8 +40,11 @@ void BurnOptDialog::setUDFSupported(bool supported, bool disableISOOpts)
     if (!model || model->rowCount() < 4)
         return;
 
-    if (!supported)
+    if (!supported) {
         model->setData(model->index(3, 0), 0, Qt::UserRole - 1);
+        if (BurnHelper::defaultBurnFs() == 3)
+            fsComb->setCurrentIndex(1);
+    }
     if (disableISOOpts) {
         model->setData(model->index(0, 0), 0, Qt::UserRole - 1);
         model->setData(model->index(1, 0), 0, Qt::UserRole - 1);
@@ -55,12 +58,15 @@ void BurnOptDialog::setISOImage(const QUrl &image)
     DFM_BURN_USE_NS
 
     imageFile = image;
-    donotcloseComb->hide();
+    finalizeDiscCheckbox->hide();
 
     fsLabel->hide();
     fsComb->hide();
 
     volnameEdit->setEnabled(false);
+
+    // checksum verification is not supported for ISO image burn
+    checksumCheckbox->setVisible(false);
 
     // we are seemingly abusing dfm-burn here. However that's actually not the case.
     QScopedPointer<DFMBURN::DOpticalDiscInfo> info { DFMBURN::DOpticalDiscManager::createOpticalInfo(QString("stdio:") + image.toLocalFile()) };
@@ -125,8 +131,10 @@ void BurnOptDialog::initializeUi()
     volnameLabel->setFont(f13);
 
     volnameEdit = new QLineEdit();
-    QRegExp regx("[^\\\\/\':\\*\\?\"<>|%&.]+");   //屏蔽特殊字符
-    QValidator *validator = new QRegExpValidator(regx, volnameEdit);
+    volnameEdit->setObjectName("VolnameEdit");
+    volnameEdit->setAccessibleName("VolnameEdit");
+    QRegularExpression regx("[^\\\\/\':\\*\\?\"<>|%&.]+");   // 屏蔽特殊字符
+    QValidator *validator = new QRegularExpressionValidator(regx, volnameEdit);
     volnameEdit->setValidator(validator);
     volnameEdit->setMaxLength(kMaxLabelLen);
 
@@ -139,6 +147,8 @@ void BurnOptDialog::initializeUi()
 
     // 高级设置内容
     advanceBtn = new DCommandLinkButton(BurnOptDialog::tr("Advanced settings"), this);
+    advanceBtn->setObjectName("AdvanceBtn");
+    advanceBtn->setAccessibleName("AdvanceBtn");
     QFont f12 = advanceBtn->font();
     f12.setPixelSize(12);
     f12.setWeight(QFont::Normal);
@@ -146,7 +156,7 @@ void BurnOptDialog::initializeUi()
     advanceBtn->setFont(f12);
 
     QHBoxLayout *advanceBtnLay = new QHBoxLayout(content);
-    advanceBtnLay->setMargin(0);
+    advanceBtnLay->setContentsMargins(0, 0, 0, 0);
     advanceBtnLay->setSpacing(0);
     advanceBtnLay->addStretch(1);
     advanceBtnLay->addWidget(advanceBtn);
@@ -157,7 +167,7 @@ void BurnOptDialog::initializeUi()
     advancedSettings->hide();
 
     QVBoxLayout *vLay = new QVBoxLayout(advancedSettings);
-    vLay->setMargin(0);
+    vLay->setContentsMargins(0, 0, 0, 0);
     vLay->setSpacing(8);
     advancedSettings->setLayout(vLay);
 
@@ -171,14 +181,16 @@ void BurnOptDialog::initializeUi()
     };
 
     fsComb = new QComboBox;
+    fsComb->setObjectName("FsComb");
+    fsComb->setAccessibleName("FsComb");
     fsComb->addItems(fsTypes);
-    fsComb->setCurrentIndex(1);   // 默认使用 i + j 的方式刻录
+    fsComb->setCurrentIndex(BurnHelper::defaultBurnFs());
     vLay->addWidget(fsComb);
     fsLabel->setFont(f13);
     fsComb->setFont(f14);
 
     static const QString &udItem = BurnOptDialog::tr("%1 (Compatible with Windows CD/DVD mode)").arg(QString("U/D/F").remove("/"));
-    if (fsComb->count() == fsTypes.count() && DSysInfo::deepinType() == DSysInfo::DeepinProfessional)
+    if (fsComb->count() == fsTypes.count() && !DSysInfo::isCommunityEdition())
         fsComb->addItem(udItem);
 
     // 控制间距
@@ -188,28 +200,42 @@ void BurnOptDialog::initializeUi()
     writespeedLabel = new QLabel(QObject::tr("Write speed:"));
     vLay->addWidget(writespeedLabel, 0, Qt::AlignTop);
     writespeedComb = new QComboBox();
+    writespeedComb->setObjectName("WritespeedComb");
+    writespeedComb->setAccessibleName("WritespeedComb");
     writespeedComb->addItem(QObject::tr("Maximum"));
     vLay->addWidget(writespeedComb, 0, Qt::AlignTop);
     speedMap[QObject::tr("Maximum")] = 0;
     writespeedLabel->setFont(f13);
     writespeedComb->setFont(f14);
 
-    // 刻录选项-允许追加
-    donotcloseComb = new QCheckBox(QObject::tr("Allow files to be added later"));
-    donotcloseComb->setChecked(true);
-    vLay->addWidget(donotcloseComb, 0, Qt::AlignTop);
+    // 刻录选项-封盘设置
+    finalizeDiscCheckbox = new QCheckBox(QObject::tr("Finalize disc after burning \n(no additional data can be appended)"));
+    finalizeDiscCheckbox->setObjectName("FinalizeDiscCheckbox");
+    finalizeDiscCheckbox->setAccessibleName("FinalizeDiscCheckbox");
+    finalizeDiscCheckbox->setChecked(false);
+    vLay->addWidget(finalizeDiscCheckbox, 0, Qt::AlignTop);
     QWidget *wpostburn = new QWidget();
     wpostburn->setLayout(new QHBoxLayout);
     vLay->addWidget(wpostburn, 0, Qt::AlignTop);
-    wpostburn->layout()->setMargin(0);
-    donotcloseComb->setFont(f12);
+    wpostburn->layout()->setContentsMargins(0, 0, 0, 0);
+    finalizeDiscCheckbox->setFont(f12);
 
     // 刻录选项-校验数据
     checkdiscCheckbox = new QCheckBox(QObject::tr("Verify data"));
+    checkdiscCheckbox->setObjectName("CheckdiscCheckbox");
+    checkdiscCheckbox->setAccessibleName("CheckdiscCheckbox");
     checkdiscCheckbox->setFont(f12);
     wpostburn->layout()->addWidget(checkdiscCheckbox);
+    // 刻录选项-校验文件
+    checksumCheckbox = new QCheckBox(QObject::tr("Verify files (checksum)"));
+    checksumCheckbox->setObjectName("ChecksumCheckbox");
+    checksumCheckbox->setAccessibleName("ChecksumCheckbox");
+    checksumCheckbox->setFont(f12);
+    vLay->addWidget(checksumCheckbox, 0, Qt::AlignTop);
     // 刻录选项-弹出光盘（目前禁用）
     ejectCheckbox = new QCheckBox(QObject::tr("Eject"));
+    ejectCheckbox->setObjectName("EjectCheckbox");
+    ejectCheckbox->setAccessibleName("EjectCheckbox");
     ejectCheckbox->setFont(f12);
     ejectCheckbox->setChecked(true);
     wpostburn->layout()->addWidget(ejectCheckbox);
@@ -241,9 +267,11 @@ DFMBURN::BurnOptions BurnOptDialog::currentBurnOptions()
 
     if (checkdiscCheckbox->isChecked())
         opts |= DFMBURN::BurnOption::kVerifyDatas;
+    if (checksumCheckbox->isChecked())
+        opts |= DFMBURN::BurnOption::kChecksum;
     if (ejectCheckbox->isChecked())
         opts |= DFMBURN::BurnOption::kEjectDisc;
-    if (donotcloseComb->isChecked())
+    if (!finalizeDiscCheckbox->isChecked())
         opts |= DFMBURN::BurnOption::kKeepAppendable;
 
     // 文件系统
@@ -296,13 +324,17 @@ void BurnOptDialog::onIndexChanged(int index)
     if (index == 3) {   // 3 is UDF
         checkdiscCheckbox->setChecked(false);
         checkdiscCheckbox->setEnabled(false);
-        donotcloseComb->setChecked(true);
-        donotcloseComb->setEnabled(false);
+        checksumCheckbox->setChecked(false);
+        checksumCheckbox->setEnabled(false);
+        finalizeDiscCheckbox->setChecked(false);
         writespeedComb->setCurrentIndex(0);
         writespeedComb->setEnabled(false);
     } else {
+        checkdiscCheckbox->setVisible(true);
+        checksumCheckbox->setVisible(true);
         checkdiscCheckbox->setEnabled(true);
-        donotcloseComb->setEnabled(true);
+        checksumCheckbox->setEnabled(true);
+        finalizeDiscCheckbox->setEnabled(true);
         writespeedComb->setEnabled(true);
     }
 }

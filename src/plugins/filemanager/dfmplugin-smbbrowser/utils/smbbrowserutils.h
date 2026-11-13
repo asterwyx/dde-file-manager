@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,9 +25,9 @@ QString getDeviceIdByStdSmb(const QString &stdSmb);
 
 // service utils
 bool isServiceRuning(const QString &service);
-bool startService(const QString &service);
-void enableServiceAsync();
+bool enableServiceNow(const QString &service);
 bool checkAndEnableService(const QString &service);
+bool ensureNetworkDiscoveryService(bool *serviceStarted = nullptr);
 
 void initSettingPane();
 // bind dconfig

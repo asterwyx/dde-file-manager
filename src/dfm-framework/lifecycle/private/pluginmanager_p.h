@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -32,7 +32,8 @@ class PluginManagerPrivate : public QSharedData
     QStringList pluginLoadIIDs;
     QStringList pluginLoadPaths;
     QStringList blackPluginNames;
-    QStringList lazyLoadPluginsNames;
+    QStringList lazyLoadPluginNames;
+    QStringList qtVersionInsensitivePluginNames;
     QStringList loadedVirtualPlugins;
     QStringList unloadedVirtualPlugins;
     QQueue<PluginMetaObjectPointer> readQueue;
@@ -79,6 +80,10 @@ private:
     bool doPluginSort(const PluginDependGroup group,
                       QMap<QString, PluginMetaObjectPointer> src,
                       QQueue<PluginMetaObjectPointer> *dest);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    bool checkPluginQtVersion(PluginMetaObjectPointer pointer);
+#endif
 };
 
 DPF_END_NAMESPACE

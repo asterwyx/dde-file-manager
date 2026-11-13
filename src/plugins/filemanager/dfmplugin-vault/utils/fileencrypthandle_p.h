@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -63,6 +63,7 @@ private:
     bool isSupportAlgoName(const QString &algoName);
     void syncGroupPolicyAlgoName();
     EncryptType encryptAlgoTypeOfGroupPolicy();
+    void setEnviroment(const QPair<QString, QString> &value);
 
 private:
     QProcess *process { nullptr };

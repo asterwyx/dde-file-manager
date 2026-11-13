@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,6 +17,6 @@ QJsonObject VaultReportData::prepareData(const QVariantMap &args) const
 {
     QVariantMap temArgs = args;
     temArgs.insert("tid", 1000500000);
-    temArgs.insert("sysTime", QDateTime::currentDateTime().toTime_t());
+    temArgs.insert("sysTime", QDateTime::currentDateTime().toSecsSinceEpoch());
     return QJsonObject::fromVariantMap(temArgs);
 }

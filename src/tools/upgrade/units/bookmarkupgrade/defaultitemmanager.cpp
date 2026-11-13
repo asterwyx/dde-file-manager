@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "config.h"   //cmake
@@ -53,9 +53,10 @@ void DefaultItemManager::initPreDefineItems()
     static constexpr char kFmPluginInterface[] { "org.deepin.plugin.filemanager" };
     static constexpr char kCommonPluginInterface[] { "org.deepin.plugin.common" };
     QStringList pluginsDirs;
+
 #ifdef QT_DEBUG
     const QString &pluginsDir { DFM_BUILD_PLUGIN_DIR };
-    qCInfo(logToolUpgrade) << QString("Load plugins path : %1").arg(pluginsDir);
+    qCInfo(logToolUpgrade) << QString("Load plugins path (Debug mode): %1").arg(pluginsDir);
     pluginsDirs.push_back(pluginsDir + "/filemanager");
     pluginsDirs.push_back(pluginsDir + "/common");
     pluginsDirs.push_back(pluginsDir);

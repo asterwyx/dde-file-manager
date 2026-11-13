@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,12 +7,14 @@
 #include "utils/pathmanager.h"
 #include "utils/servicemanager.h"
 #include "utils/encryption/interfaceactivevault.h"
+#include "utils/encryption/operatorcenter.h"
 #include "utils/fileencrypthandle.h"
 #include "utils/vaultautolock.h"
 
 #include <DToolTip>
 #include <DFloatingWidget>
 #include <DDialog>
+#include <DSpinner>
 
 #include <QPlainTextEdit>
 #include <QAbstractButton>
@@ -30,17 +32,25 @@ RecoveryKeyView::RecoveryKeyView(QWidget *parent)
 {
     //! 密钥编辑框
     recoveryKeyEdit = new QPlainTextEdit(this);
+    recoveryKeyEdit->setObjectName("RecoveryKeyEdit");
+    recoveryKeyEdit->setAccessibleName("RecoveryKeyEdit");
     recoveryKeyEdit->setPlaceholderText(tr("Input the 32-digit recovery key"));
     recoveryKeyEdit->setMaximumBlockCount(MAX_KEY_LENGTH + 3);
     recoveryKeyEdit->installEventFilter(this);
 
     //! 布局
     QVBoxLayout *mainLayout = new QVBoxLayout();
-    mainLayout->setMargin(0);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->addWidget(recoveryKeyEdit);
     setLayout(mainLayout);
 
     connect(recoveryKeyEdit, &QPlainTextEdit::textChanged, this, &RecoveryKeyView::recoveryKeyChanged);
+
+    spinner = new DSpinner(this);
+    spinner->setFixedSize(48, 48);
+    spinner->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    spinner->setFocusPolicy(Qt::NoFocus);
+    spinner->hide();
 }
 
 RecoveryKeyView::~RecoveryKeyView()
@@ -64,6 +74,7 @@ void RecoveryKeyView::showAlertMessage(const QString &text, int duration)
 {
     if (!tooltip) {
         tooltip = new DToolTip(text);
+        tooltip->setAccessibleName("Tooltip");
         tooltip->setObjectName("AlertTooltip");
         tooltip->setForegroundRole(DPalette::TextWarning);
         tooltip->setWordWrap(true);
@@ -85,6 +96,7 @@ void RecoveryKeyView::showAlertMessage(const QString &text, int duration)
     }
 
     if (duration < 0) {
+        fmDebug() << "Vault: Alert message set to persistent display";
         return;
     }
 
@@ -95,7 +107,10 @@ void RecoveryKeyView::showAlertMessage(const QString &text, int duration)
 
 void RecoveryKeyView::buttonClicked(int index, const QString &text)
 {
+    fmDebug() << "Vault: Recovery key view button clicked - index:" << index << "text:" << text;
     if (index == 1) {   // unlock vault
+        fmInfo() << "Vault: Unlock button clicked, starting unlock process";
+
         //! 点击解锁后，灰化解锁按钮
         emit sigBtnEnabled(1, false);
 
@@ -103,18 +118,41 @@ void RecoveryKeyView::buttonClicked(int index, const QString &text)
         strKey.replace("-", "");
 
         QString strCipher("");
-        if (InterfaceActiveVault::checkUserKey(strKey, strCipher)) {
+        bool isValid = false;
+        
+        // 根据版本选择验证方法
+        OperatorCenter *operatorCenter = OperatorCenter::getInstance();
+        if (operatorCenter->isNewVaultVersion()) {
+            // 新版本：直接使用恢复密钥（32字符字符串）验证
+            if (strKey.length() != 32) {
+                fmWarning() << "Vault: Invalid recovery key format, expected 32 characters, got" << strKey.length();
+                showAlertMessage(tr("Invalid recovery key format"));
+                emit sigBtnEnabled(1, true);
+                return;
+            }
+            isValid = operatorCenter->checkPassword(strKey, strCipher);
+            fmDebug() << "Vault: New version recovery key validation result:" << isValid;
+        } else {
+            // 旧版本：使用RSA用户密钥验证
+            isValid = InterfaceActiveVault::checkUserKey(strKey, strCipher);
+            fmDebug() << "Vault: Old version user key validation result:" << isValid;
+        }
+        
+        if (isValid) {
             unlockByKey = true;
-            QString encryptBaseDir = PathManager::vaultLockPath();
-            QString decryptFileDir = PathManager::vaultUnlockPath();
-            bool result = FileEncryptHandle::instance()->unlockVault(encryptBaseDir, decryptFileDir, strCipher);
+            if (!PathManager::createVaultMountDir(kVaultBasePath))
+                return;
+            bool result = VaultHelper::instance()->unlockVault(strCipher);
+            fmDebug() << "Vault: Unlock operation result:" << result;
             handleUnlockVault(result);
         } else {
+            fmWarning() << "Vault: Recovery key validation failed";
             showAlertMessage(tr("Wrong recovery key"));
         }
         emit sigBtnEnabled(1, true);
         return;
     } else {
+        fmDebug() << "Vault: Cancel button clicked, closing dialog";
         emit sigCloseDialog();
     }
 }
@@ -122,6 +160,7 @@ void RecoveryKeyView::buttonClicked(int index, const QString &text)
 int RecoveryKeyView::afterRecoveryKeyChanged(QString &str)
 {
     if (str.isEmpty()) {
+        fmDebug() << "Vault: Recovery key is empty, returning position -1";
         return -1;
     }
 
@@ -177,13 +216,16 @@ void RecoveryKeyView::recoveryKeyChanged()
     }
 
     //! 限制密钥输入框只能输入数字、字母、以及+/-
-    QRegExp rx("[a-zA-Z0-9-+/]+");
-    QString res("");
+    QRegularExpression rx("[a-zA-Z0-9-+/]+");
+    QString res;
+    QRegularExpressionMatch match;
     int pos = 0;
-    while ((pos = rx.indexIn(key, pos)) != -1) {
-        res += rx.cap(0);
-        pos += rx.matchedLength();
+
+    while ((match = rx.match(key, pos)).hasMatch()) {
+        res += match.captured(0);
+        pos = match.capturedEnd();
     }
+
     key = res;
 
     recoveryKeyEdit->blockSignals(true);
@@ -195,6 +237,7 @@ void RecoveryKeyView::recoveryKeyChanged()
         recoveryKeyEdit->setPlainText(key);
         textCursor.setPosition(position - (length - maxLength));
         recoveryKeyEdit->setTextCursor(textCursor);
+        fmWarning() << "Vault: Recovery key truncated from" << length << "to" << maxLength << "characters";
 
         recoveryKeyEdit->blockSignals(false);
         return;
@@ -213,7 +256,12 @@ void RecoveryKeyView::recoveryKeyChanged()
 void RecoveryKeyView::handleUnlockVault(bool result)
 {
     if (unlockByKey) {
+        spinner->stop();
+        spinner->hide();
+        recoveryKeyEdit->setEnabled(true);
+
         if (result) {
+            fmDebug() << "Vault: Vault unlocked successfully by recovery key";
             //! success
             VaultHelper::instance()->defaultCdAction(VaultHelper::instance()->currentWindowId(),
                                                      VaultHelper::instance()->rootUrl());
@@ -221,13 +269,16 @@ void RecoveryKeyView::handleUnlockVault(bool result)
             VaultAutoLock::instance()->slotUnlockVault(0);
             emit sigCloseDialog();
         } else {
+            fmCritical() << "Vault: Failed to unlock vault with recovery key";
             //! others
             QString errMsg = tr("Failed to unlock file vault");
             DDialog dialog(this);
-            dialog.setIcon(QIcon::fromTheme("dialog-warning"));
+            dialog.setIcon(QIcon::fromTheme("dde-file-manager"));
             dialog.setTitle(errMsg);
             dialog.addButton(tr("OK"), true, DDialog::ButtonRecommend);
             dialog.exec();
+            emit sigBtnEnabled(1, true);
+            emit sigBtnEnabled(0, true);
         }
         unlockByKey = false;
     }

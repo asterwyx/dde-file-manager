@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -37,6 +37,7 @@ public:
     virtual bool canAttributes(const FileCanType type) const override;
     virtual void updateAttributes(const QList<FileInfoAttributeID> &types = {}) override;
     static QMap<QString, QVariant> desktopFileInfo(const QUrl &fileUrl);
+    static QSharedPointer<FileInfo> convert(QSharedPointer<FileInfo> fileInfo);
 
 private:
     QSharedPointer<DesktopFileInfoPrivate> d = nullptr;

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -14,7 +14,9 @@
 #include "tagdbupgradeunit.h"
 #include "smbvirtualentryupgradeunit.h"
 #include "vaultupgradeunit.h"
-
+#include "desktoporganizeupgradeunit.h"
+#include "appattributeupgradeunit.h"
+#include "contentindexupgradeunit.h"
 // units end
 
 #include <QList>
@@ -33,7 +35,10 @@ inline QList<QSharedPointer<UpgradeUnit>> createUnits()
         RegUnit(dfm_upgrade::BookMarkUpgradeUnit),
         RegUnit(dfm_upgrade::TagDbUpgradeUnit),
         RegUnit(dfm_upgrade::SmbVirtualEntryUpgradeUnit),
-        RegUnit(dfm_upgrade::VaultUpgradeUnit)
+        RegUnit(dfm_upgrade::VaultUpgradeUnit),
+        RegUnit(dfm_upgrade::DesktopOrganizeUpgradeUnit),
+        RegUnit(dfm_upgrade::AppAttributeUpgradeUnit),
+        RegUnit(dfm_upgrade::ContentIndexUpgradeUnit)
     };
 }
 

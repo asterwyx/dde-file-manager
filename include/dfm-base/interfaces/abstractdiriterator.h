@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,6 +13,11 @@
 #include <QDirIterator>
 
 namespace dfmbase {
+
+namespace IteratorProperty {
+    inline constexpr char kKeepOrder[] = "KeepOrder";
+}
+
 class AbstractDirIterator : public QObject
 {
     Q_OBJECT
@@ -120,6 +125,10 @@ public:
     virtual QList<FileInfoPointer> fileInfos() const
     {
         return {};
+    }
+    virtual bool isWaitingForUpdates() const
+    {
+        return false;
     }
 };
 

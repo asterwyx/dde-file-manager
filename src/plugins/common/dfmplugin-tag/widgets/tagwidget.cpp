@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,6 +16,12 @@
 
 using namespace dfmplugin_tag;
 
+TagWidget::TagWidget(QWidget *parent)
+    : DFrame(parent),
+      d(new TagWidgetPrivate(this, QUrl()))
+{
+}
+
 TagWidget::TagWidget(QUrl url, QWidget *parent)
     : DFrame(parent),
       d(new TagWidgetPrivate(this, url))
@@ -29,6 +35,8 @@ TagWidget::~TagWidget()
 void TagWidget::initialize()
 {
     d->initializeUI();
+    this->setObjectName("DetailTagWidget");
+    this->setAccessibleName("DetailTagWidget");
 #ifdef ENABLE_TESTING
     dpfSlotChannel->push("dfmplugin_utils", "slot_Accessible_SetAccessibleName",
                          qobject_cast<QFrame *>(this), AcName::kAcTagWidget);
@@ -49,6 +57,15 @@ void TagWidget::setLayoutHorizontally(bool horizontal)
     d->horizontalLayout = horizontal;
 }
 
+void TagWidget::setUrl(const QUrl &url)
+{
+    if (d->url == url)
+        return;
+
+    d->url = url;
+    loadTags(url);
+}
+
 void TagWidget::loadTags(const QUrl &url)
 {
     if (!d->crumbEdit || !d->colorListWidget || !shouldShow(url))
@@ -61,8 +78,8 @@ void TagWidget::loadTags(const QUrl &url)
     d->crumbEdit->clear();
 
     for (auto it = tagsMap.begin(); it != tagsMap.end(); ++it) {
-        // defualt tag need show checked
-        if (TagHelper::instance()->isDefualtTag(it.key()))
+        // default tag need show checked
+        if (TagHelper::instance()->isDefaultTag(it.key()))
             selectColors << it.value();
 
         DCrumbTextFormat format = d->crumbEdit->makeTextFormat();
@@ -109,17 +126,27 @@ void TagWidget::onCheckedColorChanged(const QColor &color)
     QList<QUrl> urlList { d->url };
     QList<QColor> checkedColors = d->colorListWidget->checkedColorList();
 
+    // Build color->tagName mapping from DB, so renamed tags resolve correctly
+    const auto allTags = TagManager::instance()->getAllTags();
+    QMap<QString, QString> colorToTag;
+    for (auto it = allTags.cbegin(); it != allTags.cend(); ++it)
+        colorToTag[it.value().name()] = it.key();
+
     QStringList newTagNames;
     for (const QColor &color : checkedColors) {
-        QString colorName = TagHelper::instance()->qureyDisplayNameByColor(color);
-        if (colorName.isEmpty())
+        // DB-first lookup: use actual tagName from DB
+        QString tagName = colorToTag.value(color.name(), QString());
+        // Fallback to hardcoded table for brand-new tags not yet in DB
+        if (tagName.isEmpty())
+            tagName = TagHelper::instance()->queryDisplayNameByColor(color);
+        if (tagName.isEmpty())
             continue;
 
-        newTagNames << colorName;
+        newTagNames << tagName;
     }
 
     for (const QString &tagName : tagNameList) {
-        if (!TagHelper::instance()->isDefualtTag(tagName))
+        if (!TagHelper::instance()->isDefaultTag(tagName))
             newTagNames << tagName;
     }
 
@@ -130,6 +157,13 @@ void TagWidget::onCheckedColorChanged(const QColor &color)
 void TagWidget::onTagChanged(const QVariantMap &fileAndTags)
 {
     if (fileAndTags.contains(d->url.path()))
+        loadTags(d->url);
+}
+
+void TagWidget::onTagColorChanged(const QVariantMap &tagAndColorName)
+{
+    Q_UNUSED(tagAndColorName)
+    if (!d->url.isEmpty())
         loadTags(d->url);
 }
 
@@ -149,6 +183,11 @@ void TagWidget::initConnection()
 
     connect(TagManager::instance(), &TagManager::filesTagged, this, &TagWidget::onTagChanged);
     connect(TagManager::instance(), &TagManager::filesUntagged, this, &TagWidget::onTagChanged);
+    connect(TagManager::instance(), &TagManager::tagColorChanged, this, &TagWidget::onTagColorChanged);
+    connect(TagManager::instance(), &TagManager::tagDeleted, this, [this](const QString &) {
+        if (!d->url.isEmpty())
+            loadTags(d->url);
+    });
 }
 
 void TagWidget::updateCrumbsColor(const QMap<QString, QColor> &tagsColor)

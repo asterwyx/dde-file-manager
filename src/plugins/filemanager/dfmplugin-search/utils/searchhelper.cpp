@@ -1,14 +1,31 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "searchhelper.h"
+
+#include "checkboxwithfileindex.h"
+#include "checkboxwithtextindex.h"
+#include "checkboxwithocrindex.h"
+#include "checkboxwithsemanticindex.h"
+#include "searchmanager/searcher/dfmsearch/querystrategies.h"
 #include "topwidget/advancesearchbar.h"
+
+#include <dfm-search/dsearch_global.h>
+#include <dfm-search/semanticsearcher.h>
 
 #include <dfm-base/interfaces/fileinfo.h>
 #include <dfm-base/base/schemefactory.h>
+#include <dfm-base/base/urlroute.h>
+#include <dfm-base/utils/universalutils.h>
+#include <dfm-base/utils/fileutils.h>
+#include <dfm-base/base/configs/dconfig/dconfigmanager.h>
+#include <dfm-base/dfm_event_defines.h>
+#include <dfm-base/widgets/filemanagerwindowsmanager.h>
 
 #include <dfm-framework/dpf.h>
+
+#include <DSettingsOption>
 
 #include <QUrlQuery>
 
@@ -96,6 +113,60 @@ QUrl SearchHelper::setSearchWinId(const QUrl &searchUrl, const QString &winId)
     return url;
 }
 
+bool SearchHelper::shouldEnableSemanticSearch(const QString &keyword)
+{
+    // Shared predicate for both the search-start path and the runtime worker:
+    // only enable semantic search when index readiness, config, explicit-query
+    // syntax, and semantic intent all match.
+    if (!DFMSEARCH::Global::isFileNameIndexReadyForSearch())
+        return false;
+
+    // 语义搜索依赖文件名索引引擎，文件索引被关闭时随之一并停用
+    // （与设置页智能搜索开关随文件索引置灰的行为一致）。
+    if (!DConfigManager::instance()->value(DConfig::kSearchCfgPath,
+                                           DConfig::kEnableFileIndexSearch, true)
+                 .toBool()) {
+        return false;
+    }
+
+    if (!DConfigManager::instance()->value(DConfig::kSearchCfgPath,
+                                           DConfig::kEnableSemanticSearch, true)
+                 .toBool()) {
+        return false;
+    }
+
+    // Respect explicit traditional search syntax first. When the same keyword
+    // is already classified as Boolean / wildcard by the normal search path,
+    // do not start semantic search in parallel.
+    if (QuerySyntaxUtils::detect(keyword, DFMSEARCH::SearchType::FileName) != QuerySyntaxType::Simple)
+        return false;
+
+    DFMSEARCH::SemanticSearcher checker;
+    return checker.isSemanticQuery(keyword);
+}
+
+QUrl SearchHelper::viewModelUrl(const QUrl &url)
+{
+    if (url.scheme() != scheme() || !url.hasQuery())
+        return url;
+
+    // 解析原始查询参数
+    QUrlQuery urlQuery(url.query());
+    QString urlValue = urlQuery.queryItemValue("url");
+
+    // 创建新的URL对象
+    QUrl newUrl(url);
+
+    if (!urlValue.isEmpty()) {
+        // 只保留url参数
+        QUrlQuery newQuery;
+        newQuery.addQueryItem("url", urlValue);
+        newUrl.setQuery(newQuery);
+    }
+
+    return newUrl;
+}
+
 QUrl SearchHelper::fromSearchFile(const QString &filePath)
 {
     QUrl url;
@@ -180,7 +251,7 @@ bool SearchHelper::blockPaste(quint64 winId, const QList<QUrl> &fromUrls, const 
 bool SearchHelper::searchIconName(const QUrl &url, QString *iconName)
 {
     if (url.scheme() == SearchHelper::scheme()) {
-        *iconName = "search";
+        *iconName = "dfm_search";
         return true;
     }
 
@@ -314,14 +385,105 @@ bool SearchHelper::isHiddenFile(const QString &fileName, QHash<QString, QSet<QSt
             : isHiddenFile(fileParentPath, filters, searchPath);
 }
 
-QDBusInterface &SearchHelper::anythingInterface()
+bool SearchHelper::allowRepeatUrl(const QUrl &cur, const QUrl &pre)
 {
-    static QDBusInterface interface("com.deepin.anything",
-                                    "/com/deepin/anything",
-                                    "com.deepin.anything",
-                                    QDBusConnection::systemBus());
+    if (UniversalUtils::urlEqualsWithQuery(cur, pre))
+        return false;
+    if (cur.scheme() == scheme() && pre.scheme() == scheme())
+        return true;
+    return false;
+}
 
-    return interface;
+bool SearchHelper::crumbRedirectUrl(QUrl *redirectUrl)
+{
+    if (redirectUrl->scheme() == scheme()) {
+        *redirectUrl = searchTargetUrl(*redirectUrl);
+        return true;
+    }
+    return false;
+}
+
+QWidget *SearchHelper::createCheckBoxWithTextIndex(QObject *opt)
+{
+    auto option = qobject_cast<Dtk::Core::DSettingsOption *>(opt);
+    const QString &text = option->data("text").toString();
+
+    CheckBoxWithTextIndex *cb = new CheckBoxWithTextIndex;
+    cb->connectToBackend();
+    cb->setDisplayText(qApp->translate("QObject", text.toStdString().c_str()));
+    cb->setChecked(option->value().toBool());
+    cb->initStatusBar();
+
+    QObject::connect(cb, &CheckBoxWithTextIndex::checkStateChanged, option, [=](Qt::CheckState state) {
+        if (state == Qt::CheckState::Unchecked)
+            option->setValue(false);
+        else if (state == Qt::CheckState::Checked)
+            option->setValue(true);
+    });
+
+    return cb;
+}
+
+QWidget *SearchHelper::createCheckBoxWithFileIndex(QObject *opt)
+{
+    auto option = qobject_cast<Dtk::Core::DSettingsOption *>(opt);
+    const QString &text = option->data("text").toString();
+
+    CheckBoxWithFileIndex *cb = new CheckBoxWithFileIndex;
+    cb->connectToBackend();
+    cb->setDisplayText(qApp->translate("QObject", text.toStdString().c_str()));
+    cb->setChecked(option->value().toBool());
+    cb->initStatusBar();
+
+    QObject::connect(cb, &CheckBoxWithFileIndex::checkStateChanged, option, [=](Qt::CheckState state) {
+        if (state == Qt::CheckState::Unchecked)
+            option->setValue(false);
+        else if (state == Qt::CheckState::Checked)
+            option->setValue(true);
+    });
+
+    return cb;
+}
+
+QWidget *SearchHelper::createCheckBoxWithOcrIndex(QObject *opt)
+{
+    auto option = qobject_cast<Dtk::Core::DSettingsOption *>(opt);
+    const QString &text = option->data("text").toString();
+
+    CheckBoxWithOcrIndex *cb = new CheckBoxWithOcrIndex;
+    cb->connectToBackend();
+    cb->setDisplayText(qApp->translate("QObject", text.toStdString().c_str()));
+    cb->setChecked(option->value().toBool());
+    cb->initStatusBar();
+
+    QObject::connect(cb, &CheckBoxWithOcrIndex::checkStateChanged, option, [=](Qt::CheckState state) {
+        if (state == Qt::CheckState::Unchecked)
+            option->setValue(false);
+        else if (state == Qt::CheckState::Checked)
+            option->setValue(true);
+    });
+
+    return cb;
+}
+
+QWidget *SearchHelper::createCheckBoxWithSemanticIndex(QObject *opt)
+{
+    auto option = qobject_cast<Dtk::Core::DSettingsOption *>(opt);
+    const QString &text = option->data("text").toString();
+
+    CheckBoxWithSemanticIndex *cb = new CheckBoxWithSemanticIndex;
+    cb->setDisplayText(qApp->translate("QObject", text.toStdString().c_str()));
+    cb->setChecked(option->value().toBool());
+    cb->initStatusBar();
+
+    QObject::connect(cb, &CheckBoxWithSemanticIndex::checkStateChanged, option, [=](Qt::CheckState state) {
+        if (state == Qt::CheckState::Unchecked)
+            option->setValue(false);
+        else if (state == Qt::CheckState::Checked)
+            option->setValue(true);
+    });
+
+    return cb;
 }
 
 SearchHelper::SearchHelper(QObject *parent)
@@ -333,4 +495,4 @@ SearchHelper::~SearchHelper()
 {
 }
 
-}
+}   // namespace dfmplugin_search

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -37,9 +37,11 @@ private slots:
     void onDetachWindows();
     void onGeometryChanged();
     void onBackgroundChanged();
+    void onConfigChanged(const QString &cfg, const QString &key);
 
 private:
     BackgroundWidgetPointer createBackgroundWidget(QWidget *root);
+    void updateBackgroundWidgets();
 
 private:
     BackgroundManagerPrivate *const d = nullptr;

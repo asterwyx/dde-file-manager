@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,6 +17,9 @@ class DDevice;
 class DBlockDevice;
 class DProtocolDevice;
 DFM_MOUNT_END_NS
+
+#define DEVICE_SIZE_DISPLAY_BY_DISK 0
+#define DEVICE_SIZE_DISPLAY_BY_FS 1
 
 namespace dfmbase {
 
@@ -41,6 +44,13 @@ public:
     static QVariantMap loadProtocolInfo(const QString &id);
     static QVariantMap loadProtocolInfo(const ProtocolDevAutoPtr &dev);
 
+    static bool queryUsageOfBlockRealTime(const QVariantMap &itemData,
+                                          quint64 *total, quint64 *avai, quint64 *used);
+    static bool queryUsageOfProtocolRealTime(const QVariantMap &itemData,
+                                             quint64 *total, quint64 *avai, quint64 *used);
+    static bool queryDeviceUsageRealTime(const QVariantMap &itemData,
+                                         quint64 *total, quint64 *avai, quint64 *used);
+
     static bool isMountableBlockDev(const QString &id, QString &why);
     static bool isMountableBlockDev(const BlockDevAutoPtr &dev, QString &why);
     static bool isMountableBlockDev(const QVariantMap &infos, QString &why);
@@ -55,6 +65,7 @@ public:
     static QString castFromDFMMountProperty(DFMMOUNT::Property property);
 
     static void persistentOpticalInfo(const QVariantMap &datas);
+    static void clearOpticalInfo(const QString &tag);
     static void readOpticalInfo(QVariantMap &datas);
 
 private:

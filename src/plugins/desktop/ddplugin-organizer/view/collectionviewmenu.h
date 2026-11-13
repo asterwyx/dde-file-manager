@@ -1,9 +1,11 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #ifndef COLLECTIONVIEWMENU_H
 #define COLLECTIONVIEWMENU_H
+
+#include <DMenu>
 
 #include <QObject>
 
@@ -24,6 +26,7 @@ protected:
     QWidget *getCanvasView();
 private:
     CollectionView *view = nullptr;
+    DTK_WIDGET_NAMESPACE::DMenu *menuPtr { nullptr };
 };
 }
 

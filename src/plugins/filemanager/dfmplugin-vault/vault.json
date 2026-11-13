@@ -14,7 +14,7 @@
     "Custom": {
         "SidebarDisplay": [{
             "Url" : "dfmvault:///",
-            "Name": "Vault",
+            "Name": "File Vault",
             "Icon": "drive-harddisk-encrypted-symbolic",
             "Group": "Group_Device",
             "VisiableControl" : "vault",
@@ -25,8 +25,8 @@
             "Url" : "entry:///vault.vault",
             "GroupName" : "Vault",
             "Shape" : 0,
-            "ItemName" : "My Vault",
-            "ItemIcon" : "dfm_safebox",
+            "ItemName" : "File Vault",
+            "ItemIcon" : "safebox",
             "ReflectionObject" : "dfmplugin_vault::VaultEntryFileEntity*"
         }]
     }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -18,6 +18,11 @@ BasicStatusBarPrivate::BasicStatusBarPrivate(BasicStatusBar *qq)
       q(qq)
 {
     initFormatStrings();
+}
+
+BasicStatusBarPrivate::~BasicStatusBarPrivate()
+{
+    discardCurrentJob();
 }
 
 void BasicStatusBarPrivate::initFormatStrings()
@@ -48,7 +53,7 @@ void BasicStatusBarPrivate::initLayout()
     q->setFixedHeight(30);
     q->setContentsMargins(0, 0, 0, 0);
     auto vLayout = new QVBoxLayout(q);
-    vLayout->setMargin(0);
+    vLayout->setContentsMargins(0, 0, 0, 0);
     vLayout->setSpacing(0);
     auto line = new DTK_WIDGET_NAMESPACE::DHorizontalLine(q);
     line->setContentsMargins(0, 0, 0, 0);
@@ -61,47 +66,87 @@ void BasicStatusBarPrivate::initLayout()
     q->clearLayoutAndAnchors();
     layout->addWidget(tip);
     layout->setSpacing(0);
-    layout->setContentsMargins(0, 0, 4, 0);
+    layout->setContentsMargins(0, 0, 4, 1);
 }
 
 void BasicStatusBarPrivate::calcFolderContains(const QList<QUrl> &folderList)
 {
     discardCurrentJob();
 
-    fileStatisticsJog.reset(new FileStatisticsJob());
-    fileStatisticsJog->setFileHints(FileStatisticsJob::kExcludeSourceFile | FileStatisticsJob::kSingleDepth);
-
-    if (isJobDisconnect) {
-        isJobDisconnect = false;
-        initJobConnection();
+    // If too many retired jobs are still stuck (typically due to network I/O),
+    // stop scheduling new contains-scans to avoid unbounded resource growth.
+    if (retiredJobs.size() >= kMaxRetiredJobs) {
+        qCWarning(logDFMBase) << "BasicStatusBar: skip folder contains scan, retired jobs reached limit"
+                              << retiredJobs.size() << ", limit:" << kMaxRetiredJobs
+                              << ", request urls:" << folderList.size();
+        showContains = false;
+        q->updateStatusMessage();
+        return;
     }
+
+    auto *job = new FileScanner(this);
+    job->setOptions(FileScanner::ScanOption::SingleDepth | FileScanner::ScanOption::CountOnly);
+    finishedJobs.remove(job);
+
+    connect(job, &FileScanner::finished, this, [this, job](const FileScanner::ScanResult &) {
+        // `finished` can be emitted before worker thread fully stops. Track it
+        // so retireJob() can release completed jobs without waiting for re-finished.
+        finishedJobs.insert(job);
+        if (retiredJobs.remove(job) > 0) {
+            job->deleteLater();
+        }
+    });
+
+    connect(job, &QObject::destroyed, this, [this, job]() {
+        finishedJobs.remove(job);
+        retiredJobs.remove(job);
+    });
+
+    fileStatisticsJog = job;
+    ++scanGeneration;
+    initJobConnection(job, scanGeneration);
 
     fileStatisticsJog->start(folderList);
 }
 
-void BasicStatusBarPrivate::initJobConnection()
+void BasicStatusBarPrivate::initJobConnection(FileScanner *job, quint64 generation)
 {
-    if (!fileStatisticsJog)
+    if (!job)
         return;
 
-    auto onFoundFile = [this](qint64 size, int filesCount, int directoryCount) {
-        Q_UNUSED(size)
-
-        if (!sender())
+    auto onFoundFile = [this, job, generation](const FileScanner::ScanResult &result) {
+        if (generation != scanGeneration)
             return;
 
-        if (filesCount + directoryCount != folderContains) {
-            folderContains = filesCount + directoryCount;
+        if (job != fileStatisticsJog)
+            return;
+
+        int newCount = result.fileCount + result.directoryCount;
+        if (newCount != folderContains) {
+            folderContains = newCount;
             q->updateStatusMessage();
         }
     };
 
-    auto currentJob = fileStatisticsJog;
-    connect(currentJob.data(), &FileStatisticsJob::finished, this, [currentJob, this]() {
-        folderContains = currentJob->filesCount() + currentJob->directorysCount();
-        q->updateStatusMessage();
-    });
-    connect(currentJob.data(), &FileStatisticsJob::dataNotify, this, onFoundFile);
+    connect(job, &FileScanner::progressChanged, this, onFoundFile);
+}
+
+void BasicStatusBarPrivate::retireJob(FileScanner *job)
+{
+    if (!job)
+        return;
+
+    // Detach from BasicStatusBar lifetime so blocked scanners won't be
+    // synchronously destroyed on UI-thread during parent teardown.
+    job->setParent(nullptr);
+
+    if (job->isRunning() && !finishedJobs.contains(job)) {
+        retiredJobs.insert(job);
+        job->stop();
+        return;
+    }
+
+    job->deleteLater();
 }
 
 void BasicStatusBarPrivate::discardCurrentJob()
@@ -109,17 +154,7 @@ void BasicStatusBarPrivate::discardCurrentJob()
     if (!fileStatisticsJog)
         return;
 
-    fileStatisticsJog->disconnect();
-    isJobDisconnect = true;
-
-    if (fileStatisticsJog->isRunning()) {
-        auto waitDeletePointer = fileStatisticsJog;
-        connect(waitDeletePointer.data(), &FileStatisticsJob::finished, this, [this, waitDeletePointer] {
-            waitDeleteJobList.removeOne(waitDeletePointer);
-        });
-        fileStatisticsJog->stop();
-        waitDeleteJobList.append(fileStatisticsJog);
-    }
-
+    auto *oldJob = fileStatisticsJog.data();
     fileStatisticsJog = nullptr;
+    retireJob(oldJob);
 }

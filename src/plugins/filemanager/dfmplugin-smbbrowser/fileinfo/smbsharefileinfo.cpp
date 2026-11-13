@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -62,14 +62,21 @@ QIcon SmbShareFileInfo::fileIcon()
     bool isNetworkRoot = url.scheme() == Global::Scheme::kNetwork
             && url.path() == "/";
     bool isSmbRoot = url.scheme() == Global::Scheme::kSmb
-            && url.path().isEmpty();
+            && (url.path().isEmpty() || url.path() == "/");
 
     if (isNetworkRoot)
         return QIcon::fromTheme("network-workgroup");
     if (isSmbRoot)
         return QIcon::fromTheme("network-server");
 
-    return QIcon::fromTheme(d->node.iconType);
+    QIcon icon;
+    d->checkAndUpdateNode();
+    icon = QIcon::fromTheme(d->node.iconType);
+
+    if (!icon.isNull())
+        return icon;
+
+    return QIcon::fromTheme("unknown");
 }
 
 bool SmbShareFileInfo::exists() const
@@ -106,13 +113,6 @@ bool SmbShareFileInfo::canAttributes(const CanableInfoType type) const
 SmbShareFileInfoPrivate::SmbShareFileInfoPrivate(SmbShareFileInfo *qq)
     : q(qq)
 {
-    {
-        QMutexLocker locker(&smb_browser_utils::nodesMutex());
-        node = smb_browser_utils::shareNodes().value(q->fileUrl());
-#if 0
-        fmDebug() << node;
-#endif
-    }
 }
 
 SmbShareFileInfoPrivate::~SmbShareFileInfoPrivate()
@@ -128,7 +128,16 @@ bool SmbShareFileInfoPrivate::canDrop() const
     return true;
 }
 
-QString SmbShareFileInfoPrivate::fileName() const
+void SmbShareFileInfoPrivate::checkAndUpdateNode()
 {
+    if (node.url.isEmpty()) {
+        QMutexLocker locker(&smb_browser_utils::nodesMutex());
+        node = smb_browser_utils::shareNodes().value(q->fileUrl());
+    }
+}
+
+QString SmbShareFileInfoPrivate::fileName()
+{
+    checkAndUpdateNode();
     return node.displayName;
 }

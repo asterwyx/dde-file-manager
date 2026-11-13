@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -29,15 +29,16 @@ public:
     CollectionHolder *q;
     QString id;
     int screenIndex = 1;
-    CollectionFrameSize sizeMode = CollectionFrameSize::kSmall;
+    CollectionFrameSize sizeMode = CollectionFrameSize::kMiddle;
     QPointer<CollectionDataProvider> provider = nullptr;
     QPointer<CollectionModel> model = nullptr;
     QPointer<CollectionFrame> frame = nullptr;
     QPointer<CollectionWidget> widget = nullptr;
     QPointer<Surface> surface = nullptr;
     QTimer styleTimer;
+    bool customGeo = false;
 };
 
 }
 
-#endif // COLLECTIONHOLDER_P_H
+#endif   // COLLECTIONHOLDER_P_H

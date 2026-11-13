@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,6 +10,14 @@
 #include <dfm-framework/dpf.h>
 
 namespace dfmplugin_smbbrowser {
+
+/**
+ * @brief The SmbBrowser class
+ * this plugin is not only for handle samba shares
+ * but also for usual schemes such as ftp/sftp/nfs/dav
+ * TODO RENAME this plugin someday!
+ * NetShareAccessHandler might be a good name.
+ */
 
 class SmbBrowser : public dpf::Plugin
 {

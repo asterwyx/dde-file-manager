@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -23,7 +23,7 @@ class DThreadList : public QSharedData
 {
 public:
     DThreadList<T>()
-        : myList(new QList<T>) {}
+        : myList(new QList<T>) { }
     ~DThreadList()
     {
         QMutexLocker lk(&mutex);
@@ -38,10 +38,6 @@ public:
      *
      * \return
      */
-    inline void push_back(const T &t)
-    {
-        myList->push_back(t);
-    }
     inline void push_backByLock(const T &t)
     {
         QMutexLocker lk(&mutex);
@@ -78,10 +74,6 @@ public:
      *
      * \return const QList<T> &获取链表
      */
-    inline const QList<T> &list()
-    {
-        return *myList;
-    }
     inline const QList<T> &listByLock()
     {
         QMutexLocker lk(&mutex);
@@ -97,10 +89,6 @@ public:
     inline void removeAllByLock(const T &t)
     {
         QMutexLocker lk(&mutex);
-        myList->removeAll(t);
-    }
-    inline void removeAll(const T &t)
-    {
         myList->removeAll(t);
     }
     /*!
@@ -123,10 +111,6 @@ public:
      *
      * \return bool 是否包含模板
      */
-    inline bool contains(const T &t)
-    {
-        return myList->contains(t);
-    }
     inline bool containsByLock(const T &t)
     {
         QMutexLocker lk(&mutex);
@@ -163,6 +147,7 @@ public:
      */
     inline int size() const
     {
+        QMutexLocker lk(&mutex);
         return myList->size();
     }
     /*!
@@ -174,29 +159,10 @@ public:
      */
     inline const T &at(int i) const
     {
+        QMutexLocker lk(&mutex);
         return myList->at(i);
     }
-    /*!
-     * \brief first 如果链表为空，返回一个nullptr，否则返回第一个的地址
-     *
-     * \param
-     *
-     * \return T * 返回第一个地址
-     */
-    inline const T &first()
-    {
-        QMutexLocker lk(&mutex);
-        if (myList->isEmpty())
-            return nullptr;
-        return myList->first();
-    }
-    inline T takeByLock()
-    {
-        QMutexLocker lk(&mutex);
-        if (myList->isEmpty())
-            return nullptr;
-        return myList->takeFirst();
-    }
+
     /*!
      * \brief count 链表的总个数
      *
@@ -223,14 +189,6 @@ public:
     {
         QMutexLocker lk(&mutex);
         return myList->indexOf(t, from);
-    }
-    void lock()
-    {
-        mutex.lock();
-    }
-    void unlock()
-    {
-        mutex.unlock();
     }
 
 private:
@@ -301,30 +259,7 @@ public:
         QMutexLocker lk(&mutex);
         return myMap.contains(key);
     }
-    /*!
-     * \brief begin 当前map的开始迭代器
-     *
-     * \param null
-     *
-     * \return QMap<Key, Value>::iterator 当前map的开始迭代器
-     */
-    inline typename QMap<DKey, DValue>::iterator begin()
-    {
-        QMutexLocker lk(&mutex);
-        return myMap.begin();
-    }
-    /*!
-     * \brief begin 当前map的结束迭代器
-     *
-     * \param null
-     *
-     * \return QMap<Key, Value>::iterator 当前map的结束迭代器
-     */
-    inline typename QMap<DKey, DValue>::iterator end()
-    {
-        QMutexLocker lk(&mutex);
-        return myMap.end();
-    }
+
     /*!
      * \brief erase 去掉map中当前的迭代器
      *
@@ -372,6 +307,154 @@ public:
 
 private:
     QMap<DKey, DValue> myMap;   // 当前的QMap
+    QMutex mutable mutex;   // 当前的锁
+};
+
+template<class DKey, class DValue>
+class DThreadHash
+{
+public:
+    DThreadHash<DKey, DValue>()
+        : myHash()
+    {
+    }
+    /*!
+     * \brief insert 插入一个模板类型到map
+     *
+     * \param Key 模板类引用key
+     *
+     * \param Value 模板类引用value
+     *
+     * \return
+     */
+    inline void insert(const DKey &key, const DValue &value)
+    {
+        QMutexLocker lk(&mutex);
+        myHash.insert(key, value);
+    }
+    /*!
+     * \brief remove 从map中移除所有的模板类型
+     *
+     * \param Key 模板类引用key
+     *
+     * \return
+     */
+    inline void remove(const DKey &key)
+    {
+        QMutexLocker lk(&mutex);
+        myHash.remove(key);
+    }
+
+    inline QList<DKey> removeIf(std::function<bool(const DKey &, const DValue &)> predicate)
+    {
+        QMutexLocker lk(&mutex);
+        QList<DKey> removedKeys;
+        for (auto it = myHash.begin(); it != myHash.end();) {
+            if (predicate(it.key(), it.value())) {
+                removedKeys.append(it.key());
+                it = myHash.erase(it);   // erase返回下一个有效的迭代器
+            } else {
+                ++it;
+            }
+        }
+        return removedKeys;
+    }
+
+    /*!
+     * \brief contains map中是否包含key对应的键值对
+     *
+     * Key 模板类引用key
+     *
+     * \return bool 是否包含key对应的键值对
+     */
+    inline DValue value(const DKey &key)
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.value(key);
+    }
+    /*!
+     * \brief contains map中是否包含key对应的键值对
+     *
+     * Key 模板类引用key
+     *
+     * \return bool 是否包含key对应的键值对
+     */
+    inline bool contains(const DKey &key)
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.contains(key);
+    }
+    /*!
+     * \brief begin 当前map的开始迭代器
+     *
+     * \param null
+     *
+     * \return QMap<Key, Value>::iterator 当前map的开始迭代器
+     */
+    inline typename QMap<DKey, DValue>::iterator begin()
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.begin();
+    }
+    /*!
+     * \brief begin 当前map的结束迭代器
+     *
+     * \param null
+     *
+     * \return QMap<Key, Value>::iterator 当前map的结束迭代器
+     */
+    inline typename QMap<DKey, DValue>::iterator end()
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.end();
+    }
+    /*!
+     * \brief erase 去掉map中当前的迭代器
+     *
+     * \param QMap<Key, Value>::iterator map的迭代器
+     *
+     * \return QMap<Key, Value>::iterator 当前迭代器的下一个迭代器
+     */
+    inline typename QMap<DKey, DValue>::iterator erase(typename QMap<DKey, DValue>::iterator it)
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.erase(it);
+    }
+    /*!
+     * \brief count map的总个数
+     *
+     * \return int map的总个数
+     */
+    inline int count()
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.count();
+    }
+    /*!
+     * \brief clear 清理整个map
+     *
+     * \return
+     */
+    inline void clear()
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.clear();
+    }
+
+    inline QList<DKey> keys()
+    {
+        QMutexLocker lk(&mutex);
+        return myHash.keys();
+    }
+
+    inline QHash<DKey, DValue> hash() const
+    {
+        QMutexLocker lk(&mutex);
+        return myHash;
+    }
+
+private:
+    QHash<DKey, DValue> myHash;   // 当前的QMap
     QMutex mutable mutex;   // 当前的锁
 };
 }

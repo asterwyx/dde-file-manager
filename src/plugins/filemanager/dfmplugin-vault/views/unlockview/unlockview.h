@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,9 +11,11 @@
 #include <DToolTip>
 #include <DFloatingWidget>
 #include <DLabel>
+#include <DSpinner>
 
 #include <QFrame>
 #include <QPushButton>
+#include <QFutureWatcher>
 
 namespace dfmplugin_vault {
 class UnlockView : public QFrame
@@ -33,6 +35,10 @@ public:
 
     void buttonClicked(int index, const QString &text);
 
+    // 老密码方案迁移模式（从pbkdf2迁移到LUKS）
+    void setOldPasswordSchemeMigrationMode(bool enabled);
+    bool isOldPasswordSchemeMigrationMode() const;
+
 signals:
     /*!
      * /brief signalJump 页面跳转
@@ -48,6 +54,8 @@ public slots:
     void onPasswordChanged(const QString &pwd);
 
     void onVaultUlocked(int state);
+
+    void onPasswordCheckFinished();
 
 private slots:
     //! UI初始化
@@ -78,7 +86,16 @@ private:
     //! 定时器，用于定时隐藏tooltip
     QTimer *tooltipTimer { nullptr };
     DTK_WIDGET_NAMESPACE::DLabel *forgetPassword { nullptr };   //! 忘记密码提示与找回入口
+    DTK_WIDGET_NAMESPACE::DSpinner *spinner { nullptr };   //! 加载动画
+    struct PasswordCheckResult {
+        bool isValid;
+        QString masterKey;   // Base64编码的主密钥
+    };
+    QFutureWatcher<PasswordCheckResult> *passwordCheckWatcher { nullptr };   //! 密码验证异步操作
+    QString pendingPassword;   //! 待验证的密码
     bool extraLockVault { true };
+
+    bool isOldPasswordSchemeMigrationModeFlag { false };
 };
 }
 #endif   // UNLOCKVIEW_H

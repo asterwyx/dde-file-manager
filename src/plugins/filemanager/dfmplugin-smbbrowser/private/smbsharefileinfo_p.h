@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,10 +20,11 @@ public:
     virtual ~SmbShareFileInfoPrivate();
 
     bool canDrop() const;
+    void checkAndUpdateNode();
 
 private:
     SmbShareNode node;
-    QString fileName() const;
+    QString fileName();
     SmbShareFileInfo *const q;
 };
 

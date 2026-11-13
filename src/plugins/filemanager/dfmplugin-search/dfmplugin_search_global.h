@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,8 @@
 #define DFMPLUGIN_SEARCH_GLOBAL_H
 
 #include <dfm-base/dfm_log_defines.h>
+
+#include <QUrl>
 
 #define DPSEARCH_NAMESPACE dfmplugin_search
 #define DPSEARCH_BEGIN_NAMESPACE namespace DPSEARCH_NAMESPACE {
@@ -23,30 +25,49 @@ DFM_LOG_USE_CATEGORY(DPSEARCH_NAMESPACE)
 
 namespace SearchActionId {
 inline constexpr char kOpenFileLocation[] { "open-file-location" };
-inline constexpr char kSrtPath[] { "sort-by-path" };
+inline constexpr char kSortByPath[] { "sort-by-path" };
+// group by actions
+inline constexpr char kGroupByPath[] { "group-by-path" };
 }
+
+// Match Method grouping dimension. Lives in the search plugin — the workspace
+// only holds the strategy via the dfm-base abstract pointer and never knows
+// these constants. Registered with supportedSchemes = ["search"] so the
+// dimension only appears in search-view menus and the title-bar group button.
+namespace MatchMethod {
+inline constexpr char kStrategyName[] { "MatchMethod" };
+inline constexpr char kGroupExact[] { "exact" };   // keyword hits: FileName/Content/OCR
+inline constexpr char kGroupSmart[] { "smart" };   // semantic hits
+}   // namespace MatchMethod
 
 namespace CustomKey {
 inline constexpr char kDisableSearch[] { "Property_Key_DisableSearch" };
 inline constexpr char kRedirectedPath[] { "Property_Key_RedirectedPath" };
 inline constexpr char kUseNormalMenu[] { "Property_Key_UseNormalMenu" };
+inline constexpr char kCurmbUrl[] {"CrumbData_Key_Url"};
+inline constexpr char kCurmbIconName[] {"CrumbData_Key_IconName"};
+inline constexpr char kCurmbDisplayText[] {"CrumbData_Key_DisplayText"};
 }
 
 namespace SearchSettings {
 inline constexpr char kGroupSearch[] { SEARCH_SETTING_GROUP };
-inline constexpr char kIndexInternal[] { SEARCH_SETTING_GROUP ".00_index_internal" };
-inline constexpr char kIndexExternal[] { SEARCH_SETTING_GROUP ".01_index_external" };
-inline constexpr char kFulltextSearch[] { SEARCH_SETTING_GROUP ".02_fulltext_search" };
-inline constexpr char kDisplaySearchHistory[] { SEARCH_SETTING_GROUP ".03_display_search_history" };
-inline constexpr char kClearSearchHistory[] { SEARCH_SETTING_GROUP ".04_clear_search_history" };
+inline constexpr char kFileIndexSearch[] { SEARCH_SETTING_GROUP ".00_file_index_search" };
+inline constexpr char kFulltextSearch[] { SEARCH_SETTING_GROUP ".01_fulltext_search" };
+inline constexpr char kOcrTextSearch[] { SEARCH_SETTING_GROUP ".02_ocr_text_search" };
+inline constexpr char kSemanticSearch[] { SEARCH_SETTING_GROUP ".03_semantic_search" };
 }
 
 namespace DConfig {
 inline constexpr char kSearchCfgPath[] { "org.deepin.dde.file-manager.search" };
+inline constexpr char kEnableFileIndexSearch[] { "enableFileIndexSearch" };
 inline constexpr char kEnableFullTextSearch[] { "enableFullTextSearch" };
-inline constexpr char kDisplaySearchHistory[] { "displaySearchHistory" };
+inline constexpr char kEnableOcrTextSearch[] { "enableOcrTextSearch" };
+inline constexpr char kEnableSemanticSearch[] { "enableSemanticSearch" };
+inline constexpr char kSearchAuthHintDone[] { "searchAuthHintDone" };
 }
 
 DPSEARCH_END_NAMESPACE
+
+Q_DECLARE_METATYPE(QUrl *);
 
 #endif   // DFMPLUGIN_SEARCH_GLOBAL_H

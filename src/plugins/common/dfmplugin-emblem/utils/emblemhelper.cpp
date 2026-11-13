@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,7 @@
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/utils/fileutils.h>
+#include <dfm-base/utils/protocolutils.h>
 
 #include <dfm-framework/event/event.h>
 #include <dfm-io/dfileinfo.h>
@@ -23,6 +24,10 @@ DPEMBLEM_USE_NAMESPACE
 void GioEmblemWorker::onProduce(const FileInfoPointer &info)
 {
     Q_ASSERT(qApp->thread() != QThread::currentThread());
+
+    if (!info) {
+        return;  // 添加空指针检查
+    }
 
     const auto &emblems { fetchEmblems(info) };
 
@@ -199,6 +204,8 @@ EmblemHelper::~EmblemHelper()
 {
     workerThread.quit();
     workerThread.wait();
+    delete worker;
+    worker = nullptr;
 }
 
 QList<QIcon> EmblemHelper::systemEmblems(const FileInfoPointer &info) const
@@ -210,7 +217,7 @@ QList<QIcon> EmblemHelper::systemEmblems(const FileInfoPointer &info) const
     if (!info)
         return {};
 
-    // feat: https://pms.uniontech.com/story-view-31477.html
+    // feat: story 1477
     // For desktop files hide all system emblem icons
     if (FileUtils::isDesktopFileInfo(info))
         return {};
@@ -263,19 +270,22 @@ QList<QIcon> EmblemHelper::gioEmblemIcons(const QUrl &url) const
 
 void EmblemHelper::pending(const FileInfoPointer &info)
 {
+    if (!info)
+        return;
+    
     emit requestProduce(info);
 }
 
 bool EmblemHelper::isExtEmblemProhibited(const FileInfoPointer &info, const QUrl &url)
 {
     // SMB mounted by cifs (v6), so mountpoint is native path
-    if (FileUtils::isGvfsFile(url))
+    if (ProtocolUtils::isRemoteFile(url))
         return true;
 
     // In the block device, all file extension emblem icons are displayed by default,
     // When configuring emblem icons display, all file extension corners are displayed in the block device
     // When emblem icons hiding is configured, all file extension corners are hidden in the block device
-    if ((info ? !info->extendAttributes(ExtInfoType::kFileLocalDevice).toBool() : !FileUtils::isLocalDevice(url))) {
+    if (!ProtocolUtils::isLocalFile(url)) {
         bool enable { DConfigManager::instance()->value("org.deepin.dde.file-manager.emblem", "blockExtEnable", true).toBool() };
         if (enable)
             return false;
@@ -287,8 +297,9 @@ bool EmblemHelper::isExtEmblemProhibited(const FileInfoPointer &info, const QUrl
 
 void EmblemHelper::onEmblemChanged(const QUrl &url, const Product &product)
 {
+    bool hadEmblem = !productQueue.value(url).isEmpty();
     productQueue[url] = product;
-    if (product.isEmpty())
+    if (product.isEmpty() && !hadEmblem)
         return;
     auto eventID { DPF_NAMESPACE::Event::instance()->eventType("ddplugin_canvas", "slot_FileInfoModel_UpdateFile") };
     if (eventID != DPF_NAMESPACE::EventTypeScope::kInValid)
@@ -314,7 +325,6 @@ void EmblemHelper::initialize()
     dpfSignalDispatcher->installEventFilter(GlobalEventType::kChangeCurrentUrl, this, &EmblemHelper::onUrlChanged);
 
     worker->moveToThread(&workerThread);
-    connect(&workerThread, &QThread::finished, worker, &QObject::deleteLater);
     connect(this, &EmblemHelper::requestProduce, worker, &GioEmblemWorker::onProduce, Qt::QueuedConnection);
     connect(this, &EmblemHelper::requestClear, worker, &GioEmblemWorker::onClear, Qt::QueuedConnection);
     connect(worker, &GioEmblemWorker::emblemChanged, this, &EmblemHelper::onEmblemChanged, Qt::QueuedConnection);

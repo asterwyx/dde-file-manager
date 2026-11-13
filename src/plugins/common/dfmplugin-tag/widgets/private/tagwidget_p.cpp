@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,8 +16,7 @@
 #endif
 
 #include <QVBoxLayout>
-
-static constexpr int kTagWidgetHeight { 114 };
+#include <QSizePolicy>
 
 DWIDGET_USE_NAMESPACE
 DTK_USE_NAMESPACE
@@ -36,23 +35,32 @@ TagWidgetPrivate::~TagWidgetPrivate()
 
 void TagWidgetPrivate::initializeUI()
 {
+    q->setObjectName("DetailTagWidget");
+    q->setAccessibleName("DetailTagWidget");
+
     mainLayout = new QVBoxLayout(q);
     q->setLayout(mainLayout);
     QString name = tr("Tag");
     tagLable = new DLabel(name, q);
+    tagLable->setAccessibleName("TagLable");
     DFontSizeManager::instance()->bind(tagLable, DFontSizeManager::SizeType::T6, QFont::DemiBold);
     tagLable->setObjectName(name);
     tagLeftLable = new DLabel(name, q);
+    tagLeftLable->setAccessibleName("TagLeftLable");
     tagLeftLable->setObjectName(name);
     tagLeftLable->setHidden(true);
 
     colorListWidget = new TagColorListWidget(q, TagColorListWidget::kProperty);
     colorListWidget->setMaximumHeight(30);
     colorListWidget->setObjectName("tagActionWidget");
+    colorListWidget->setAccessibleName("DetailTagColorListWidget");
     colorListWidget->setToolTipVisible(false);
+
+    colorListWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
     crumbEdit = new TagCrumbEdit(q);
     crumbEdit->setObjectName("tagCrumbEdit");
+    crumbEdit->setAccessibleName("DetailTagCrumbEdit");
     crumbEdit->setFrameShape(QFrame::Shape::NoFrame);
     crumbEdit->viewport()->setBackgroundRole(QPalette::NoRole);
     crumbEdit->setFocusPolicy(Qt::ClickFocus);
@@ -62,6 +70,7 @@ void TagWidgetPrivate::initializeUI()
         tagColorListLayout->addWidget(tagLable);
         tagColorListLayout->addWidget(tagLeftLable);
         tagColorListLayout->addWidget(colorListWidget);
+        tagColorListLayout->addStretch();
     } else {
         tagColorListLayout = new QVBoxLayout;
         tagColorListLayout->addWidget(tagLable, 0, Qt::AlignLeft);
@@ -80,8 +89,6 @@ void TagWidgetPrivate::initializeUI()
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::sizeModeChanged, this, &TagWidgetPrivate::initUiForSizeMode);
 #else
     mainLayout->setContentsMargins(10, 10, 10, 10);
-    crumbEdit->setMaximumHeight(100);
-    q->setFixedHeight(kTagWidgetHeight);
 #endif
 }
 
@@ -89,8 +96,6 @@ void TagWidgetPrivate::initUiForSizeMode()
 {
 #ifdef DTKWIDGET_CLASS_DSizeMode
     mainLayout->setContentsMargins(DSizeModeHelper::element(5, 10), 6, 10, 10);
-    crumbEdit->setMaximumHeight(DSizeModeHelper::element(50, 50));
-    colorListWidget->setFixedWidth(214);
-    q->setFixedHeight(DSizeModeHelper::element(kTagWidgetHeight, kTagWidgetHeight));
+    colorListWidget->setMaximumWidth(214);
 #endif
 }

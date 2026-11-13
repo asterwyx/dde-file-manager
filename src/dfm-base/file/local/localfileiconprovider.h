@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,7 +27,7 @@ public:
     QIcon icon(const QString &path) const;
     QIcon icon(const QFileInfo &info, const QIcon &feedback) const;
     QIcon icon(const QString &path, const QIcon &feedback) const;
-    QIcon icon(FileInfo *info, const QIcon &feedback = QIcon());
+    QIcon icon(FileInfoPointer info, const QIcon &feedback = QIcon());
 
 private:
     QScopedPointer<LocalFileIconProviderPrivate> d;

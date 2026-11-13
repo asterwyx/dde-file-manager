@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,12 +13,6 @@
 #include <QFileInfo>
 
 namespace dfmplugin_burn {
-
-namespace Persistence {
-inline constexpr char kBurnStateGroup[] { "BurnState" };
-inline constexpr char kWoringKey[] { "Working" };
-inline constexpr char kIdKey[] { "id" };
-}   // namespace Persistence
 
 class BurnHelper
 {
@@ -35,9 +29,11 @@ public:
     static void updateBurningStateToPersistence(const QString &id, const QString &dev, bool working);
     static void mapStagingFilesPath(const QList<QUrl> &srcList, const QList<QUrl> &targetList);
     static bool isBurnEnabled();
+    static int defaultBurnFs();
     static bool burnIsOnLocalStaging(const QUrl &url);
     static QFileInfoList localFileInfoList(const QString &path);
     static QFileInfoList localFileInfoListRecursive(const QString &path, QDir::Filters filters = (QDir::Files | QDir::NoSymLinks));
+    static bool isMountableImage(const QString &mimeTypeName);
 };
 
 }   // namespace dfmplugin_burn

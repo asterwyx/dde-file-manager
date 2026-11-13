@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -47,8 +47,8 @@ private:
 
     TagColorListWidget *getMenuListWidget() const;
 
-    QAction *createTagAction() const;
-    QAction *createColorListAction() const;
+    QAction *createTagAction(QMenu *parent) const;
+    QAction *createColorListAction(QMenu *parent) const;
     QWidget *findDesktopView(QWidget *root) const;
 };
 

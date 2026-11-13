@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,7 @@
 #include "commandparser.h"
 
 #include <dfm-base/utils/windowutils.h>
+#include <dfm-base/utils/finallyutil.h>
 
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -35,6 +36,7 @@ SingleApplication::~SingleApplication()
 void SingleApplication::initConnect()
 {
     connect(localServer, &QLocalServer::newConnection, this, &SingleApplication::handleConnection);
+    connect(this, &QApplication::aboutToQuit, this, &SingleApplication::closeServer);
 }
 
 QLocalSocket *SingleApplication::getNewClientConnect(const QString &key, const QByteArray &message)
@@ -49,7 +51,7 @@ QLocalSocket *SingleApplication::getNewClientConnect(const QString &key, const Q
             }
         }
     } else {
-        qCDebug(logAppFileManager) << localSocket->errorString();
+        qCWarning(logAppFileManager) << "SingleApplication::getNewClientConnect: Failed to connect to server:" << localSocket->errorString();
     }
 
     return localSocket;
@@ -86,12 +88,8 @@ void SingleApplication::openAsAdmin()
 void SingleApplication::handleNewClient(const QString &uniqueKey)
 {
     QByteArray data { nullptr };
-    bool isSetGetMonitorFiles = false;
 
     for (const QString &arg : arguments()) {
-        if (arg == "--get-monitor-files")
-            isSetGetMonitorFiles = true;
-
         if (!arg.startsWith("-") && QFile::exists(arg))
             data.append(QDir(arg).absolutePath().toLocal8Bit().toBase64());
         else
@@ -104,11 +102,14 @@ void SingleApplication::handleNewClient(const QString &uniqueKey)
         data.chop(1);
 
     QLocalSocket *socket = SingleApplication::getNewClientConnect(uniqueKey, data);
-    if (isSetGetMonitorFiles && socket->error() == QLocalSocket::UnknownSocketError) {
+    if (socket) {
         socket->waitForReadyRead();
 
         for (const QByteArray &i : socket->readAll().split(' '))
-            qCDebug(logAppFileManager) << QString::fromLocal8Bit(QByteArray::fromBase64(i));
+            qInfo(logAppFileManager) << QString::fromLocal8Bit(QByteArray::fromBase64(i));
+
+        socket->close();
+        socket->deleteLater();
     }
 }
 
@@ -134,7 +135,7 @@ bool SingleApplication::setSingleInstance(const QString &key)
 
 void SingleApplication::handleConnection()
 {
-    qCDebug(logAppFileManager) << "new connection is coming";
+    qCDebug(logAppFileManager) << "SingleApplication::handleConnection: New client connection received";
     QLocalSocket *nextPendingConnection = localServer->nextPendingConnection();
     connect(nextPendingConnection, SIGNAL(readyRead()), this, SLOT(readData()));
 }
@@ -143,8 +144,10 @@ void SingleApplication::readData()
 {
     QLocalSocket *socket = qobject_cast<QLocalSocket *>(sender());
 
-    if (!socket)
+    if (!socket) {
+        qCWarning(logAppFileManager) << "SingleApplication::readData: Invalid socket sender";
         return;
+    }
 
     QStringList arguments;
     for (const QByteArray &arg_base64 : socket->readAll().split(' ')) {
@@ -153,14 +156,23 @@ void SingleApplication::readData()
         if (arg.isEmpty())
             continue;
 
-        arguments << QString::fromLocal8Bit(arg);
+        QString argstr = QString::fromLocal8Bit(arg);
+        arguments << argstr;
     }
 
+    qCDebug(logAppFileManager) << "SingleApplication::readData: Processing" << arguments.size() << "arguments from client";
     CommandParser::instance().process(arguments);
 
-    if (CommandParser::instance().isSet("get-monitor-files")) {
-        //Todo(yanghao&lxs): get-monitor-files
+    FinallyUtil release([&] {
+        if (socket) {
+            socket->close();
+            socket->deleteLater();
+        }
+    });
 
+    if (CommandParser::instance().isSet("get-monitor-files")) {
+        qCDebug(logAppFileManager) << "SingleApplication::readData: Processing get-monitor-files request";
+        //Todo(yanghao&lxs): get-monitor-files
         return;
     }
 
@@ -170,9 +182,21 @@ void SingleApplication::readData()
 void SingleApplication::closeServer()
 {
     if (localServer) {
+        qCDebug(logAppFileManager) << "SingleApplication::closeServer: Closing local server";
         localServer->removeServer(localServer->serverName());
         localServer->close();
         delete localServer;
         localServer = nullptr;
     }
+}
+
+void SingleApplication::handleQuitAction()
+{
+    // fix bug-272373
+    // When exiting the process, if a copy task exists (@abstractjob.cpp),
+    // this task will block the main thread, causing the UI to be unresponsive.
+    // So here is a rewrite of the exit implementation that closes all the windows
+    // of the filemanager
+    qCInfo(logAppFileManager) << "SingleApplication::handleQuitAction: Closing all file manager windows";
+    WindowUtils::closeAllFileManagerWindows();
 }

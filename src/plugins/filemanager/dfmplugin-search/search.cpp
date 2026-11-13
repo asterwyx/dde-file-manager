@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,14 +6,22 @@
 #include "events/searcheventreceiver.h"
 #include "utils/searchhelper.h"
 #include "utils/custommanager.h"
+#include "utils/ocrindexclient.h"
+#include "utils/textindexclient.h"
 #include "fileinfo/searchfileinfo.h"
 #include "iterator/searchdiriterator.h"
 #include "watcher/searchfilewatcher.h"
 #include "topwidget/advancesearchbar.h"
 #include "menus/searchmenuscene.h"
 #include "searchmanager/searchmanager.h"
+#include "groups/matchmethodgroupstrategy.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include <dfm-base/utils/highlightprovider.h>
+#include <dfm-base/interfaces/abstractgroupstrategy.h>
+
+#include <dfm-search/contentretriever.h>
+
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/dfm_event_defines.h>
@@ -23,26 +31,62 @@
 #include <dfm-base/settingdialog/settingjsongenerator.h>
 #include <dfm-base/base/configs/settingbackend.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
+#include <dfm-base/utils/dialogmanager.h>
+#include <dfm-base/utils/viewdefines.h>
+#include <dfm-base/utils/sysinfoutils.h>
+
+#include <QIcon>
 
 using CreateTopWidgetCallback = std::function<QWidget *()>;
 using ShowTopWidgetCallback = std::function<bool(QWidget *, const QUrl &)>;
+using ViewModeUrlCallback = std::function<QUrl(const QUrl)>;
+// Identical signature to the workspace's StrategyFactory typedef — registered
+// the same way so DPF_NAMESPACE::paramGenerator resolves to the same metatype
+// across plugin boundaries.
+using StrategyFactory = std::function<DFMBASE_NAMESPACE::AbstractGroupStrategy *(QObject *)>;
 Q_DECLARE_METATYPE(CreateTopWidgetCallback);
 Q_DECLARE_METATYPE(ShowTopWidgetCallback);
 Q_DECLARE_METATYPE(QList<QVariantMap> *);
 Q_DECLARE_METATYPE(QString *);
 Q_DECLARE_METATYPE(QVariant *)
+Q_DECLARE_METATYPE(ViewModeUrlCallback)
+Q_DECLARE_METATYPE(StrategyFactory);
 
 DFMBASE_USE_NAMESPACE
+DFMGLOBAL_USE_NAMESPACE
+
 namespace dfmplugin_search {
-DFM_LOG_REISGER_CATEGORY(DPSEARCH_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPSEARCH_NAMESPACE)
 
 void Search::initialize()
 {
     UrlRoute::regScheme(SearchHelper::scheme(), "/", {}, true, tr("Search"));
-    //注册Scheme为"search"的扩展的文件信息
+    // 注册Scheme为"search"的扩展的文件信息
     InfoFactory::regClass<SearchFileInfo>(SearchHelper::scheme());
     DirIteratorFactory::regClass<SearchDirIterator>(SearchHelper::scheme());
-    WatcherFactory::regClass<SearchFileWatcher>(SearchHelper::scheme());
+    WatcherFactory::regClass<SearchFileWatcher>(SearchHelper::scheme(),
+                                                WatcherFactory::RegOpts::kNoCache);
+
+    // must inited in main thread
+    TextIndexClient::instance();
+    OcrIndexClient::instance();
+
+    // 注册 HighlightProvider 的 fetchHighlight 回调（延迟加载模式）
+    HighlightProvider::instance()->setFetchCallback(
+            [](const QString &path, const QString &keyword, int searchType) -> QString {
+                // Reuse the retriever in the worker thread to avoid rebuilding it
+                // for every highlight request.
+                thread_local DFMSEARCH::ContentRetriever retriever;
+
+                DFMSEARCH::HighlightOptions opts;
+                int posLen = HighlightProvider::instance()->positioningMaxLength();
+                if (posLen > 0)
+                    opts.setPositioningMaxLength(posLen);
+
+                return retriever.fetchHighlight(path, keyword,
+                                                static_cast<DFMSEARCH::SearchType>(searchType),
+                                                opts);
+            });
 
     bindEvents();
     bindWindows();
@@ -75,9 +119,15 @@ void Search::onWindowOpened(quint64 windId)
 
 void Search::regSearchCrumbToTitleBar()
 {
+    ViewModeUrlCallback viewModelUrlCallback { SearchHelper::viewModelUrl };
     QVariantMap property;
     property["Property_Key_KeepAddressBar"] = true;
+    property[ViewCustomKeys::kSupportTreeMode] = false;
+    property[ViewCustomKeys::kAllowChangeListHeight] = false;
+    property[ViewCustomKeys::kViewModeUrlCallback] = QVariant::fromValue(viewModelUrlCallback);
     dpfSlotChannel->push("dfmplugin_titlebar", "slot_Custom_Register", SearchHelper::scheme(), property);
+    dpfHookSequence->follow("dfmplugin_titlebar", "hook_Crumb_RedirectUrl",
+                            SearchHelper::instance(), &SearchHelper::crumbRedirectUrl);
 
     QStringList &&filtes { "kFileSizeField", "kFileChangeTimeField", "kFileInterviewTimeField" };
     dpfSlotChannel->push("dfmplugin_detailspace", "slot_BasicFiledFilter_Add",
@@ -88,8 +138,18 @@ void Search::regSearchToWorkspace()
 {
     dpfSlotChannel->push("dfmplugin_workspace", "slot_RegisterFileView", SearchHelper::scheme());
     dpfSlotChannel->push("dfmplugin_workspace", "slot_RegisterMenuScene", SearchHelper::scheme(), SearchMenuCreator::name());
-    dpfSlotChannel->push("dfmplugin_workspace", "slot_View_SetDefaultViewMode", SearchHelper::scheme(), Global::ViewMode::kListMode);
-    dpfSlotChannel->push("dfmplugin_workspace", "slot_NotSupportTreeView", SearchHelper::scheme());
+    dpfSlotChannel->push("dfmplugin_workspace", "slot_Model_RegisterLoadStrategy", SearchHelper::scheme(), DFMGLOBAL_NAMESPACE::DirectoryLoadStrategy::kPreserve);
+    dpfSlotChannel->push("dfmplugin_workspace", "slot_RegisterFocusFileViewDisabled", SearchHelper::scheme());
+
+    ViewModeUrlCallback viewModelUrlCallback { SearchHelper::viewModelUrl };
+    QVariantMap propertise {
+        { DFMGLOBAL_NAMESPACE::ViewCustomKeys::kSupportTreeMode, false },
+        { DFMGLOBAL_NAMESPACE::ViewCustomKeys::kDefaultViewMode, static_cast<int>(Global::ViewMode::kListMode) },
+        { DFMGLOBAL_NAMESPACE::ViewCustomKeys::kAllowChangeListHeight, false },
+        { DFMGLOBAL_NAMESPACE::ViewCustomKeys::kDefaultListHeight, ViewDefines().listHeightCount() - 1 },
+        { DFMGLOBAL_NAMESPACE::ViewCustomKeys::kViewModeUrlCallback, QVariant::fromValue(viewModelUrlCallback) }
+    };
+    dpfSlotChannel->push("dfmplugin_workspace", "slot_View_SetCustomViewProperty", SearchHelper::scheme(), propertise);
 
     CreateTopWidgetCallback createCallback { []() { return new AdvanceSearchBar(); } };
     ShowTopWidgetCallback showCallback { SearchHelper::showTopWidget };
@@ -97,59 +157,78 @@ void Search::regSearchToWorkspace()
     QVariantMap map {
         { "Property_Key_Scheme", SearchHelper::scheme() },
         { "Property_Key_KeepShow", false },
+        { "Property_Key_KeepTop", true },
         { "Property_Key_CreateTopWidgetCallback", QVariant::fromValue(createCallback) },
         { "Property_Key_ShowTopWidgetCallback", QVariant::fromValue(showCallback) }
     };
 
     dpfSlotChannel->push("dfmplugin_workspace", "slot_RegisterCustomTopWidget", map);
+
+    // Register the "Match Method" group strategy with the workspace's
+    // registered-strategy extension point. The strategy object crosses the
+    // plugin boundary through the dfm-base AbstractGroupStrategy abstract
+    // pointer; only control signaling crosses via dpf. supportedSchemes =
+    // ["search"] so the dimension only appears in search-view menus and the
+    // title-bar group button.
+    StrategyFactory factory { [](QObject *parent) -> AbstractGroupStrategy * {
+        return new MatchMethodGroupStrategy(parent);
+    } };
+    QVariantMap groupMap {
+        { "Property_Key_GroupStrategyName", QString(MatchMethod::kStrategyName) },
+        { "Property_Key_GroupStrategyDisplayName", tr("Match method") },
+        { "Property_Key_GroupStrategySchemes", QStringList { SearchHelper::scheme() } },
+        { "Property_Key_GroupStrategyFactory", QVariant::fromValue(factory) }
+    };
+    dpfSlotChannel->push("dfmplugin_workspace", "slot_RegisterGroupStrategy", groupMap);
 }
 
 void Search::regSearchSettingConfig()
 {
+    if (SysInfoUtils::isOpenAsAdmin())
+        return;
+
     QString err;
     auto ret = DConfigManager::instance()->addConfig(DConfig::kSearchCfgPath, &err);
     if (!ret)
         fmWarning() << "cannot regist dconfig of search plugin:" << err;
 
     SettingJsonGenerator::instance()->addGroup(SearchSettings::kGroupSearch, tr("Search"));
-    if (SearchHelper::anythingInterface().isValid()) {
-        SettingJsonGenerator::instance()->addCheckBoxConfig(SearchSettings::kIndexInternal,
-                                                            tr("Auto index internal disk"),
-                                                            false);
-        SettingBackend::instance()->addSettingAccessor(
-                SearchSettings::kIndexInternal,
-                []() {
-                    return SearchHelper::anythingInterface().property("autoIndexInternal");
-                },
-                [](const QVariant &val) {
-                    SearchHelper::anythingInterface().setProperty("autoIndexInternal", val);
-                });
 
-        SettingJsonGenerator::instance()->addCheckBoxConfig(SearchSettings::kIndexExternal,
-                                                            tr("Index external storage device after connected to computer"),
-                                                            false);
-        SettingBackend::instance()->addSettingAccessor(
-                SearchSettings::kIndexExternal,
-                []() {
-                    return SearchHelper::anythingInterface().property("autoIndexExternal");
-                },
-                [](const QVariant &val) {
-                    SearchHelper::anythingInterface().setProperty("autoIndexExternal", val);
-                });
-    }
+    QString fileIndexKey { SearchSettings::kFileIndexSearch };
+    DialogManager::instance()->registerSettingWidget("checkBoxWithFileIndex", &SearchHelper::createCheckBoxWithFileIndex);
+    SettingJsonGenerator::instance()->addConfig(SearchSettings::kFileIndexSearch,
+                                                { { "key", fileIndexKey.mid(fileIndexKey.lastIndexOf(".") + 1) },
+                                                  { "text", tr("File index") },
+                                                  { "type", "checkBoxWithFileIndex" },
+                                                  { "default", true } });
 
-    SettingJsonGenerator::instance()->addCheckBoxConfig(SearchSettings::kFulltextSearch,
-                                                        tr("Full-Text search"),
-                                                        false);
-    SettingJsonGenerator::instance()->addCheckBoxConfig(SearchSettings::kDisplaySearchHistory,
-                                                        tr("Display search history"),
-                                                        true);
+    SettingBackend::instance()->addSettingAccessor(
+            SearchSettings::kFileIndexSearch,
+            []() {
+                return DConfigManager::instance()->value(DConfig::kSearchCfgPath,
+                                                         DConfig::kEnableFileIndexSearch,
+                                                         true);
+            },
+            [](const QVariant &val) {
+                DConfigManager::instance()->setValue(DConfig::kSearchCfgPath,
+                                                     DConfig::kEnableFileIndexSearch,
+                                                     val);
+            });
+
+    QString textIndexKey { SearchSettings::kFulltextSearch };
+    DialogManager::instance()->registerSettingWidget("checkBoxWithTextIndex", &SearchHelper::createCheckBoxWithTextIndex);
+    SettingJsonGenerator::instance()->addConfig(SearchSettings::kFulltextSearch,
+                                                { { "key", textIndexKey.mid(textIndexKey.lastIndexOf(".") + 1) },
+                                                  { "text", tr("Full-Text search") },
+                                                  { "type", "checkBoxWithTextIndex" },
+                                                  { "default", true } });
+
     SettingBackend::instance()->addSettingAccessor(
             SearchSettings::kFulltextSearch,
             []() {
                 return DConfigManager::instance()->value(DConfig::kSearchCfgPath,
                                                          DConfig::kEnableFullTextSearch,
-                                                         false);
+                                                         true);
             },
             [](const QVariant &val) {
                 DConfigManager::instance()->setValue(DConfig::kSearchCfgPath,
@@ -157,24 +236,49 @@ void Search::regSearchSettingConfig()
                                                      val);
             });
 
+    // OCR text search configuration
+    QString ocrIndexKey { SearchSettings::kOcrTextSearch };
+    DialogManager::instance()->registerSettingWidget("checkBoxWithOcrIndex", &SearchHelper::createCheckBoxWithOcrIndex);
+    SettingJsonGenerator::instance()->addConfig(SearchSettings::kOcrTextSearch,
+                                                { { "key", ocrIndexKey.mid(ocrIndexKey.lastIndexOf(".") + 1) },
+                                                  { "text", tr("Image-Content search") },
+                                                  { "type", "checkBoxWithOcrIndex" },
+                                                  { "default", false } });
+
     SettingBackend::instance()->addSettingAccessor(
-            SearchSettings::kDisplaySearchHistory,
+            SearchSettings::kOcrTextSearch,
             []() {
                 return DConfigManager::instance()->value(DConfig::kSearchCfgPath,
-                                                         DConfig::kDisplaySearchHistory,
+                                                         DConfig::kEnableOcrTextSearch,
+                                                         false);
+            },
+            [](const QVariant &val) {
+                DConfigManager::instance()->setValue(DConfig::kSearchCfgPath,
+                                                     DConfig::kEnableOcrTextSearch,
+                                                     val);
+            });
+
+    // Semantic search configuration
+    QString semanticIndexKey { SearchSettings::kSemanticSearch };
+    DialogManager::instance()->registerSettingWidget("checkBoxWithSemanticIndex", &SearchHelper::createCheckBoxWithSemanticIndex);
+    SettingJsonGenerator::instance()->addConfig(SearchSettings::kSemanticSearch,
+                                                { { "key", semanticIndexKey.mid(semanticIndexKey.lastIndexOf(".") + 1) },
+                                                  { "text", tr("Smart search") },
+                                                  { "type", "checkBoxWithSemanticIndex" },
+                                                  { "default", true } });
+
+    SettingBackend::instance()->addSettingAccessor(
+            SearchSettings::kSemanticSearch,
+            []() {
+                return DConfigManager::instance()->value(DConfig::kSearchCfgPath,
+                                                         DConfig::kEnableSemanticSearch,
                                                          true);
             },
             [](const QVariant &val) {
                 DConfigManager::instance()->setValue(DConfig::kSearchCfgPath,
-                                                     DConfig::kDisplaySearchHistory,
+                                                     DConfig::kEnableSemanticSearch,
                                                      val);
             });
-    SettingJsonGenerator::instance()->addConfig(SearchSettings::kClearSearchHistory,
-                   { { "key", "04_clear_search_history" },
-                     { "desc", tr("Clear dde-file-manager Search Records") },
-                     { "text", tr("Clean up") },
-                     { "type", "pushButton" },
-                     { "trigger", QVariant(Application::kClearSearchHistory) } });
 }
 
 void Search::bindEvents()
@@ -186,6 +290,8 @@ void Search::bindEvents()
                             SearchHelper::instance(), &SearchHelper::customRoleDisplayName);
     dpfHookSequence->follow("dfmplugin_workspace", "hook_ShortCut_PasteFiles",
                             SearchHelper::instance(), &SearchHelper::blockPaste);
+    dpfHookSequence->follow("dfmplugin_workspace", "hook_Allow_Repeat_Url",
+                            SearchHelper::instance(), &SearchHelper::allowRepeatUrl);
     dpfHookSequence->follow("dfmplugin_detailspace", "hook_Icon_Fetch",
                             SearchHelper::instance(), &SearchHelper::searchIconName);
 
@@ -196,10 +302,21 @@ void Search::bindEvents()
                                    SearchEventReceiverIns, &SearchEventReceiver::handleStopSearch);
     dpfSignalDispatcher->subscribe("dfmplugin_titlebar", "signal_FilterView_Show",
                                    SearchEventReceiverIns, &SearchEventReceiver::handleShowAdvanceSearchBar);
-    dpfSignalDispatcher->subscribe(GlobalEventType::kChangeCurrentUrl,
-                                   SearchEventReceiverIns, &SearchEventReceiver::handleUrlChanged);
     dpfSignalDispatcher->subscribe("dfmplugin_titlebar", "signal_InputAdddressStr_Check",
                                    SearchEventReceiverIns, &SearchEventReceiver::handleAddressInputStr);
+
+    dpfSignalDispatcher->subscribe("dfmplugin_fileoperations", "signal_File_Add",
+                                   SearchEventReceiverIns, &SearchEventReceiver::handleFileAdd);
+    dpfSignalDispatcher->subscribe("dfmplugin_fileoperations", "signal_File_Delete",
+                                   SearchEventReceiverIns, &SearchEventReceiver::handleFileDelete);
+    dpfSignalDispatcher->subscribe("dfmplugin_fileoperations", "signal_File_Rename",
+                                   SearchEventReceiverIns, &SearchEventReceiver::handleFileRename);
+
+    // URL 切换时根据列宽更新 highlight 定位窗口大小
+    dpfSignalDispatcher->subscribe(GlobalEventType::kChangeCurrentUrl,
+                                   SearchEventReceiverIns, &SearchEventReceiver::handleUrlChanged);
+    dpfSignalDispatcher->subscribe(GlobalEventType::kChangeCurrentUrl,
+                                   SearchManager::instance(), &SearchManager::onWindowUrlChanged);
 
     // connect self slot events
     static constexpr auto selfSpace { DPF_MACRO_TO_STR(DPSEARCH_NAMESPACE) };
@@ -218,6 +335,8 @@ void Search::bindWindows()
         onWindowOpened(id);
     });
     connect(&FMWindowsIns, &FileManagerWindowsManager::windowOpened, this, &Search::onWindowOpened, Qt::DirectConnection);
+    connect(&FMWindowsIns, &FileManagerWindowsManager::windowClosed,
+            SearchManager::instance(), &SearchManager::onWindowClosed, Qt::DirectConnection);
 }
 
 }   // namespace Search

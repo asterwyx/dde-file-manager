@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -57,9 +57,10 @@ private:
     QComboBox *writespeedComb { nullptr };
     QLabel *fsLabel { nullptr };
     QComboBox *fsComb { nullptr };
-    QCheckBox *donotcloseComb { nullptr };
+    QCheckBox *finalizeDiscCheckbox { nullptr };
     QLabel *postburnLabel { nullptr };
     QCheckBox *checkdiscCheckbox { nullptr };
+    QCheckBox *checksumCheckbox { nullptr };
     QCheckBox *ejectCheckbox { nullptr };
 };
 

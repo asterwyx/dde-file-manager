@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,9 +25,8 @@ public:
     explicit ReportLogWorker(QObject *parent = nullptr);
     ~ReportLogWorker();
 
-    bool init();
-
 public Q_SLOTS:
+    void init();
     void commitLog(const QString &type, const QVariantMap &args);
     void handleMenuData(const QString &name, const QList<QUrl> &urlList);
     void handleBlockMountData(const QString &id, bool result);

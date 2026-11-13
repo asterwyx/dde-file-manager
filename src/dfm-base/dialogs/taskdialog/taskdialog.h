@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,7 +42,8 @@ Q_SIGNALS:
 private Q_SLOTS:
     void moveYCenter();
     void removeTask();
-    void adjustSize(int hight = 0);
+    void scheduleResize();
+    void resizeAndCenter();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -53,7 +54,10 @@ private:
     QMap<JobHandlePointer, QListWidgetItem *> taskItems;
     DTitlebar *titlebar { nullptr };
     QDBusReply<QDBusUnixFileDescriptor> replyBlokShutDown;
+    static constexpr uint32_t kInvalidScreenSaverCookie = 0;
+    uint32_t screenSaverCookie { kInvalidScreenSaverCookie };
     static int kMaxHeight;
+    bool m_resizeScheduled { false };
 };
 
 }

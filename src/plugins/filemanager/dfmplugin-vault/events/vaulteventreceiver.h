@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,7 @@
 #include "dfmplugin_vault_global.h"
 
 #include <QObject>
+#include <QUrl>
 
 namespace dfmplugin_vault {
 class VaultEventReceiver : public QObject
@@ -15,6 +16,14 @@ class VaultEventReceiver : public QObject
     Q_OBJECT
 private:
     VaultEventReceiver(QObject *parent = nullptr);
+    //! Re-entry guard: prevents recursive calls to changeUrlEventFilter during vault unlock.
+    //! When the vault is encrypted and unlockVaultDialog is called, the synchronous unlock flow
+    //! (waitForFinished on cryfs process) spins a nested Qt event loop. If a kChangeCurrentUrl
+    //! event is dispatched inside that loop, changeUrlEventFilter is called again before the
+    //! first invocation finishes. The filesystem check (state(useCache=false)) still sees the
+    //! vault as encrypted because cryfs hasn't completed mounting, causing another unlockVaultDialog
+    //! call and infinite recursion until the stack is exhausted.
+    static bool s_urlChangeInUnlock;
 
 public:
     static VaultEventReceiver *instance();

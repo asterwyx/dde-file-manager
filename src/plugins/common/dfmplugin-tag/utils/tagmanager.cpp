@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,12 +17,12 @@
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/base/schemefactory.h>
-#include <dfm-base/base/device/deviceutils.h>
 #include <dfm-base/utils/dialogmanager.h>
 #include <dfm-base/utils/clipboard.h>
 #include <dfm-base/utils/fileutils.h>
 #include <dfm-base/utils/systempathutil.h>
 #include <dfm-base/utils/universalutils.h>
+#include <dfm-base/utils/protocolutils.h>
 #include <dfm-base/file/local/desktopfileinfo.h>
 
 #include <dfm-framework/dpf.h>
@@ -124,10 +124,19 @@ bool TagManager::canTagFile(const FileInfoPointer &info) const
 
 bool TagManager::paintListTagsHandle(int role, const FileInfoPointer &info, QPainter *painter, QRectF *rect)
 {
-    if (!canTagFile(info))
+    if ((role != kItemFileDisplayNameRole && role != kItemNameRole) || info.isNull())
         return false;
 
-    if (role != kItemFileDisplayNameRole && role != kItemNameRole)
+    auto tagStat = info->extendAttributes(ExtInfoType::kFileCanTag);
+    bool canTag = false;
+    if (tagStat.isValid()) {
+        canTag = tagStat.toBool();
+    } else {
+        canTag = canTagFile(info);
+        info->setExtendedAttributes(ExtInfoType::kFileCanTag, canTag);
+    }
+
+    if (!canTag)
         return false;
 
     QString path = info->pathOf(PathInfoType::kFilePath);
@@ -152,7 +161,19 @@ bool TagManager::paintListTagsHandle(int role, const FileInfoPointer &info, QPai
 
 bool TagManager::addIconTagsHandle(const FileInfoPointer &info, ElideTextLayout *layout)
 {
-    if (!canTagFile(info))
+    if (info.isNull())
+        return false;
+
+    auto tagStat = info->extendAttributes(ExtInfoType::kFileCanTag);
+    bool canTag = false;
+    if (tagStat.isValid()) {
+        canTag = tagStat.toBool();
+    } else {
+        canTag = canTagFile(info);
+        info->setExtendedAttributes(ExtInfoType::kFileCanTag, canTag);
+    }
+
+    if (!canTag)
         return false;
 
     QString path = info->pathOf(PathInfoType::kFilePath);
@@ -239,7 +260,7 @@ QString TagManager::getTagIconName(const QString &tag) const
 
     const auto &dataMap = getTagsColorName({ tag });
     if (dataMap.contains(tag))
-        return TagHelper::instance()->qureyIconNameByColor(QColor(dataMap.value(tag)));
+        return TagHelper::instance()->queryIconNameByColor(QColor(dataMap.value(tag)));
 
     return QString();
 }
@@ -275,12 +296,14 @@ QStringList TagManager::getTagsByUrls(const QList<QUrl> &urls) const
 {
     // single path:  get all tags of path
     // mult paths:  get same tags of paths
-
     if (urls.isEmpty())
         return {};
 
+    QList<QUrl> realUrls;
+    UniversalUtils::urlsTransformToLocal(urls, &realUrls);
+
     QStringList paths;
-    for (const auto &url : TagHelper::commonUrls(urls)) {
+    for (const auto &url : TagHelper::commonUrls(realUrls)) {
         paths.append(url.path());
     }
 
@@ -299,15 +322,23 @@ QStringList TagManager::getFilesByTag(const QString &tag)
     return dataMap.value(tag).toStringList();
 }
 
+QHash<QString, QStringList> TagManager::findChildren(const QString &parentPath) const
+{
+    const auto &url = FileUtils::bindUrlTransform(QUrl::fromLocalFile(parentPath));
+    return FileTagCacheIns.findChildren(url.path());
+}
+
 bool TagManager::setTagsForFiles(const QStringList &tags, const QList<QUrl> &files)
 {
-
     // if tags is empty means delete all files's tags
     if (files.isEmpty())
         return false;
 
+    QList<QUrl> realUrls;
+    UniversalUtils::urlsTransformToLocal(files, &realUrls);
+
     // set tags for mult files
-    QStringList mutualTagNames = TagManager::instance()->getTagsByUrls(files);
+    QStringList mutualTagNames = TagManager::instance()->getTagsByUrls(realUrls);
     // for deleting.
     QStringList dirtyTagNames;
     for (const QString &tag : mutualTagNames)
@@ -316,9 +347,9 @@ bool TagManager::setTagsForFiles(const QStringList &tags, const QList<QUrl> &fil
 
     bool result = false;
     if (!dirtyTagNames.isEmpty())
-        result = TagManager::instance()->removeTagsOfFiles(dirtyTagNames, files) || result;
+        result = TagManager::instance()->removeTagsOfFiles(dirtyTagNames, realUrls) || result;
 
-    for (const QUrl &url : TagHelper::commonUrls(files)) {
+    for (const QUrl &url : TagHelper::commonUrls(realUrls)) {
         QStringList tagsOfFile = TagManager::instance()->getTagsByUrls({ url });
         QStringList newTags;
 
@@ -338,13 +369,16 @@ bool TagManager::setTagsForFiles(const QStringList &tags, const QList<QUrl> &fil
 
 bool TagManager::addTagsForFiles(const QList<QString> &tags, const QList<QUrl> &files)
 {
+
     if (tags.isEmpty() || files.isEmpty())
         return false;
 
+    QList<QUrl> urls;
+    UniversalUtils::urlsTransformToLocal(files, &urls);
     // tag --- color
     QMap<QString, QVariant> tagWithColor {};
     for (const QString &tagName : tags) {
-        QString colorName = tagColorMap.contains(tagName) ? tagColorMap[tagName] : TagHelper::instance()->qureyColorByDisplayName(tagName).name();
+        QString colorName = tagColorMap.contains(tagName) ? tagColorMap[tagName] : TagHelper::instance()->queryColorByDisplayName(tagName).name();
         tagWithColor[tagName] = QVariant { QList<QString> { colorName } };
     }
 
@@ -352,7 +386,7 @@ bool TagManager::addTagsForFiles(const QList<QString> &tags, const QList<QUrl> &
     QVariant checkTagResult { TagProxyHandleIns->addTags(tagWithColor) };
     if (checkTagResult.toBool()) {
         QVariantMap infos;
-        for (const auto &f : TagHelper::commonUrls(files))
+        for (const auto &f : TagHelper::commonUrls(urls))
             infos[f.path()] = QVariant(tags);
 
         if (TagProxyHandleIns->addTagsForFiles(infos))
@@ -370,9 +404,12 @@ bool TagManager::removeTagsOfFiles(const QList<QString> &tags, const QList<QUrl>
     if (tags.isEmpty() || files.isEmpty())
         return false;
 
+    QList<QUrl> urls;
+    UniversalUtils::urlsTransformToLocal(files, &urls);
+
     QMap<QString, QVariant> fileWithTag;
 
-    for (const QUrl &url : TagHelper::commonUrls(files)) {
+    for (const QUrl &url : TagHelper::commonUrls(urls)) {
         fileWithTag[UrlRoute::urlToPath(url)] = QVariant(tags);
     }
 
@@ -432,21 +469,31 @@ void TagManager::deleteTags(const QStringList &tags)
     }
 }
 
-void TagManager::deleteFiles(const QList<QUrl> &urls)
-{
-    QStringList paths;
-    for (const auto &temp : TagHelper::commonUrls(urls))
-        paths.append(temp.toString());
-
-    this->deleteTagData(paths, DeleteOpts::kFiles);
-}
-
 bool TagManager::changeTagColor(const QString &tagName, const QString &newTagColor)
 {
     if (tagName.isEmpty() || newTagColor.isEmpty())
         return false;
+
+    QColor newColor = TagHelper::instance()->queryColorByColorName(newTagColor);
+    QString newDisplayName = TagHelper::instance()->queryDisplayNameByColor(newColor);
+
+    // If changing a default tag to another default color, sync tagName to match
+    if (!newDisplayName.isEmpty() && newDisplayName != tagName
+        && TagHelper::instance()->isDefaultTag(tagName)) {
+        if (getAllTags().contains(newDisplayName)) {
+            DialogManagerInstance->showRenameNameSameErrorDialog(newDisplayName);
+            return false;
+        }
+        // Change color first, then rename to keep consistency
+        QVariantMap colorChangeMap { { tagName, QVariant { newColor.name() } } };
+        TagProxyHandleIns->changeTagsColor(colorChangeMap);
+        QVariantMap oldAndNewName = { { tagName, QVariant { newDisplayName } } };
+        emit tagDeleted(tagName);
+        return TagProxyHandleIns->changeTagNamesWithFiles(oldAndNewName);
+    }
+
     emit tagDeleted(tagName);
-    QVariantMap changeMap { { tagName, QVariant { TagHelper::instance()->qureyColorByColorName(newTagColor).name() } } };
+    QVariantMap changeMap { { tagName, QVariant { newColor.name() } } };
     return TagProxyHandleIns->changeTagsColor(changeMap);
 }
 
@@ -460,9 +507,66 @@ bool TagManager::changeTagName(const QString &tagName, const QString &newName)
         return false;
     }
 
+    // If new name matches a default color, sync the tag color to match.
+    // This prevents inconsistency where tagName="Gray" but tagColor remains #9023fc.
+    QColor defaultColor = TagHelper::instance()->queryColorByDisplayName(newName);
+    if (defaultColor.isValid()) {
+        QVariantMap colorChangeMap { { tagName, QVariant { defaultColor.name() } } };
+        TagProxyHandleIns->changeTagsColor(colorChangeMap);
+    }
+
     QVariantMap oldAndNewName = { { tagName, QVariant { newName } } };
     emit tagDeleted(tagName);
     return TagProxyHandleIns->changeTagNamesWithFiles(oldAndNewName);
+}
+
+bool TagManager::removeChildren(const QString &parentPath)
+{
+    bool ret = true;
+    const auto &children = findChildren(parentPath);
+    for (auto it = children.cbegin(); it != children.cend(); ++it) {
+        ret &= removeTagsOfFiles(it.value(), { QUrl::fromLocalFile(it.key()) });
+    }
+
+    return ret;
+}
+
+bool TagManager::saveTrashFileTags(const QString &originalPath, qint64 fileInode, const QStringList &tagNames)
+{
+    if (originalPath.isEmpty() || fileInode <= 0 || tagNames.isEmpty())
+        return false;
+
+    // Save to database via D-Bus
+    return TagProxyHandleIns->saveTrashFileTags(originalPath, fileInode, tagNames);
+}
+
+QStringList TagManager::getTrashFileTags(const QString &originalPath, qint64 fileInode)
+{
+    if (originalPath.isEmpty())
+        return {};
+
+    // Try cache first
+    const auto &cachedTags = FileTagCacheIns.getTrashFileTags(originalPath, fileInode);
+    if (!cachedTags.isEmpty())
+        return cachedTags;
+
+    // Query from database via D-Bus
+    return TagProxyHandleIns->getTrashFileTags(originalPath, fileInode);
+}
+
+bool TagManager::removeTrashFileTags(const QString &originalPath, qint64 fileInode)
+{
+    if (originalPath.isEmpty())
+        return false;
+
+    // Remove from database via D-Bus
+    return TagProxyHandleIns->removeTrashFileTags(originalPath, fileInode);
+}
+
+bool TagManager::clearAllTrashTags()
+{
+    // Clear database via D-Bus
+    return TagProxyHandleIns->clearAllTrashTags();
 }
 
 QMap<QString, QString> TagManager::getTagsColorName(const QStringList &tags) const
@@ -528,7 +632,7 @@ bool TagManager::localFileCanTagFilter(const FileInfoPointer &info) const
             return desktopInfo->canTag();
     }
 
-    if (DeviceUtils::isSamba(url))
+    if (ProtocolUtils::isSMBFile(url))
         return false;
 
     return !SystemPathUtil::instance()->isSystemPath(filePath);
@@ -571,7 +675,7 @@ void TagManager::contenxtMenuHandle(quint64 windowId, const QUrl &url, const QPo
 
     // tag action
     menu->addAction(QObject::tr("Rename"), [url, windowId]() {
-        dpfSlotChannel->push("dfmplugin_sidebar", "slot_Item_TriggerEdit", windowId, url);
+        QTimer::singleShot(200, [url, windowId] { dpfSlotChannel->push("dfmplugin_sidebar", "slot_Item_TriggerEdit", windowId, url); });
     });
 
     menu->addAction(QObject::tr("Remove"), [url]() {
@@ -592,7 +696,7 @@ void TagManager::contenxtMenuHandle(quint64 windowId, const QUrl &url, const QPo
     connect(tagAction, &QWidgetAction::triggered, TagManager::instance(), [url, tagWidget]() {
         if (tagWidget->checkedColorList().size() > 0) {
             QString tagName = TagHelper::instance()->getTagNameFromUrl(url);
-            QString colorName = TagHelper::instance()->qureyColorNameByColor(tagWidget->checkedColorList().first());
+            QString colorName = TagHelper::instance()->queryColorNameByColor(tagWidget->checkedColorList().first());
 
             TagManager::instance()->changeTagColor(tagName, colorName);
         }
@@ -625,13 +729,17 @@ QMap<QString, QColor> TagManager::assignColorToTags(const QStringList &tagList) 
                 tagColor = allTags[tag];
             } else {
                 const auto &colorName = TagHelper::instance()->getColorNameByTag(tag);
-                tagColor = TagHelper::instance()->qureyColorByColorName(colorName);
+                tagColor = TagHelper::instance()->queryColorByColorName(colorName);
                 TagManager::instance()->registerTagColor(tag, tagColor.name());
             }
 
             tagsMap[tag] = tagColor;
         } else {
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
             tagsMap.unite(tagMap);
+#else
+            tagsMap.insert(tagMap);
+#endif
         }
     }
 
@@ -662,7 +770,7 @@ void TagManager::onTagColorChanged(const QVariantMap &tagAndColorName)
     auto it = tagAndColorName.begin();
     while (it != tagAndColorName.end()) {
         QUrl url = TagHelper::instance()->makeTagUrlByTagName(it.key());
-        QString iconName = TagHelper::instance()->qureyIconNameByColor(QColor(it.value().toString()));
+        QString iconName = TagHelper::instance()->queryIconNameByColor(QColor(it.value().toString()));
         QIcon icon = QIcon::fromTheme(iconName);
         QVariantMap map {
             { "Property_Key_Icon", icon },
@@ -671,6 +779,7 @@ void TagManager::onTagColorChanged(const QVariantMap &tagAndColorName)
         dpfSlotChannel->push("dfmplugin_sidebar", "slot_Item_Update", url, map);
         ++it;
     }
+    emit tagColorChanged(tagAndColorName);
 }
 
 void TagManager::onTagNameChanged(const QVariantMap &oldAndNew)

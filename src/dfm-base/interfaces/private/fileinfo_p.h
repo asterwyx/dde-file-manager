@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,8 +27,10 @@ public:
     QUrl getUrlByNewFileName(const QString &fileName) const;
     QString fileName() const;
     QString baseName() const;
+    QString completeBaseName() const;
     QString suffix() const;
-    bool canDrop();
+    bool canDrop() const;
+    QString canonicalPath() const;
 };
 
 }

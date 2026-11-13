@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -29,9 +29,9 @@ public Q_SLOTS:
 
 private:
     // method 2
-    bool parseLocationEmblemIcons(const QString &path, int count, QSharedPointer<DFMEXT::DFMExtEmblemIconPlugin> plugin);
+    bool parseLocationEmblemIcons(const QString &path, int count, DFMEXT::DFMExtEmblemIconPlugin *plugin);
     // method 1
-    void parseEmblemIcons(const QString &path, int count, QSharedPointer<DFMEXT::DFMExtEmblemIconPlugin> plugin);
+    void parseEmblemIcons(const QString &path, int count, DFMEXT::DFMExtEmblemIconPlugin *plugin);
 
     CacheType makeCache(const QString &path, const QList<QPair<QString, int>> &group);
     void makeLayoutGroup(const std::vector<DFMEXT::DFMExtEmblemIconLayout> &layouts, QList<QPair<QString, int>> *group);
@@ -70,6 +70,10 @@ public:
     bool readyFlag { false };
     QList<QPair<QString, int>> readyLocalPaths;
     QMap<QString, QList<QPair<QString, int>>> positionEmbelmCaches;   // file path ->  { pairs { emblem icon path, pos }}
+    // 缓存已加载的图标，避免重复加载
+    // 键: 图标路径或主题名称
+    // 值: 对应的QIcon对象
+    QHash<QString, QIcon> iconCaches;
 };
 
 DPUTILS_END_NAMESPACE

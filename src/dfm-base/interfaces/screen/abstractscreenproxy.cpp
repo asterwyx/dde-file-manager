@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,6 +42,11 @@ void AbstractScreenProxy::appendEvent(AbstractScreenProxy::Event e)
 
     eventShot->stop();
     eventShot->start(100);
+}
+
+bool AbstractScreenProxy::validateEvent(AbstractScreenProxy::Event) const
+{
+    return true;
 }
 
 }

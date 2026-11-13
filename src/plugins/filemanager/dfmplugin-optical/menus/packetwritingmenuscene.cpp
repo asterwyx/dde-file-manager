@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2024 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,8 +34,10 @@ QString PacketWritingMenuScenePrivate::findSceneName(QAction *act) const
 
 bool PacketWritingMenuScenePrivate::isContainSubDirFile(const QString &mnt) const
 {
-    if (selectFiles.isEmpty() || mnt.isEmpty())
+    if (selectFiles.isEmpty() || mnt.isEmpty()) {
+        fmDebug() << "No subdirectory files check - selectFiles empty:" << selectFiles.isEmpty() << "mount point empty:" << mnt.isEmpty();
         return false;
+    }
 
     return std::any_of(selectFiles.begin(), selectFiles.end(), [mnt](const QUrl &url) {
         const QString &directory {
@@ -80,6 +82,8 @@ bool PacketWritingMenuScene::initialize(const QVariantHash &params)
     // currentdir is not mountpoint
     QString dev { DeviceUtils::getMountInfo(currentPath, false) };
     QString curMnt { OpticalHelper::findMountPoint(currentPath) };
+    fmDebug() << "Initial device info - dev:" << dev << "mount point:" << curMnt;
+
     if (dev.isEmpty()) {
         dev = DeviceUtils::getMountInfo(curMnt, false);
         d->isWorkingSubDir = true;
@@ -100,6 +104,7 @@ bool PacketWritingMenuScene::initialize(const QVariantHash &params)
 void PacketWritingMenuScene::updateState(QMenu *parent)
 {
     if (!d->isPackeWritingDir) {
+        fmDebug() << "Not a packet writing directory, using default menu state update";
         AbstractMenuScene::updateState(parent);
         return;
     }
@@ -125,6 +130,7 @@ void PacketWritingMenuScene::updateState(QMenu *parent)
     static const QStringList whiteEmptyActIdList {
         "display-as",
         "sort-by",
+        "group-by",
         "open-as-administrator",
         "open-in-terminal",
         "paste",

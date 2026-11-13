@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -51,9 +51,12 @@ Q_SIGNALS:
     // 第二个参数表示，当前是链接文件的原文件更新完成
     void fileRefreshFinished(const QUrl url, const QString &infoPtr, const bool isLinkOrg);
     void fileRefreshRequest(QSharedPointer<FileInfo> dfileInfo);
+    void requestCheckInfoRefresh(QSharedPointer<FileInfo> dfileInfo);
+    void smbSeverMayModifyPassword(const QUrl &url);
 private Q_SLOTS:
     void aboutToQuit();
     void handleFileRefresh(QSharedPointer<FileInfo> dfileInfo);
+    void handleCheckInfoRefresh(QSharedPointer<FileInfo> dfileInfo);
 
 private:
     void checkInfoRefresh(QSharedPointer<FileInfo> dfileInfo);

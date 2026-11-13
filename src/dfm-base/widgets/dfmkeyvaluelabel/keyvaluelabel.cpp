@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,11 +8,14 @@
 #include <QMenu>
 #include <QClipboard>
 #include <QApplication>
+#include <QAbstractTextDocumentLayout>
 
 #include <dtkwidget_global.h>
 #ifdef DTKWIDGET_CLASS_DSizeMode
 #    include <DSizeMode>
 #endif
+#include <DGuiApplicationHelper>
+#include <DPalette>
 
 static constexpr int kMaxShowRowNum { 4 };
 static constexpr char kSelectAllName[] { "select-all" };
@@ -40,10 +43,14 @@ void KeyValueLabel::initUI()
 {
     leftValueLabel = new DLabel(this);
     rightValueEdit = new RightValueWidget(this);
+    rightValueEdit->setObjectName("RightValueEdit");
+    rightValueEdit->setAccessibleName("RightValueEdit");
+    auto layout = rightValueEdit->document()->documentLayout();
     connect(rightValueEdit, &RightValueWidget::clicked, this, &KeyValueLabel::valueAreaClicked);
+    connect(layout, &QAbstractTextDocumentLayout::documentSizeChanged, this, &KeyValueLabel::adjustHeight);
     rightValueEdit->setMinimumWidth(130);
     glayout = new QGridLayout;
-    glayout->setMargin(0);
+    glayout->setContentsMargins(0, 0, 0, 0);
     glayout->addWidget(leftValueLabel, 0, 0);
     glayout->addWidget(rightValueEdit, 0, 1);
     glayout->setColumnStretch(0, 1);
@@ -125,7 +132,7 @@ void KeyValueLabel::setRightValue(QString value, Qt::TextElideMode elideMode, Qt
         fontW = fontMinWidth;
     QString elideNote = fontM.elidedText(value, elideMode, fontW);
     rightValueEdit->setCompleteText(value);
-    rightValueEdit->setText(elideNote);
+    rightValueEdit->setPlainText(elideNote);
     if (toolTipVisibility) {
         if (elideNote != value)
             rightValueEdit->setToolTip(value);
@@ -154,7 +161,10 @@ void KeyValueLabel::setLeftRightValue(QString leftValue, QString rightValue, Qt:
 
 void KeyValueLabel::adjustHeight()
 {
-    rightValueEdit->setFixedHeight(static_cast<int>(rightValueEdit->document()->size().height()) + 2);
+    qreal docHeight = rightValueEdit->document()->size().height();
+    QMargins margins = rightValueEdit->contentsMargins();
+    int totalHeight = qCeil(docHeight) + margins.top() + margins.bottom();
+    rightValueEdit->setFixedHeight(totalHeight);
 }
 
 /*!
@@ -188,6 +198,9 @@ void KeyValueLabel::setLeftFontSizeWeight(DFontSizeManager::SizeType sizeType, Q
 void KeyValueLabel::setRightFontSizeWeight(DFontSizeManager::SizeType sizeType, QFont::Weight fontWeight, DPalette::ColorType foregroundRole)
 {
     DFontSizeManager::instance()->bind(rightValueEdit, sizeType, fontWeight);
+
+    // Configure text color via palette so it applies to all text and stays consistent with theme changes
+    rightValueEdit->setForegroundRole(foregroundRole);
 }
 
 QString KeyValueLabel::LeftValue()
@@ -205,7 +218,7 @@ DLabel *KeyValueLabel::leftWidget()
     return leftValueLabel;
 }
 
-void KeyValueLabel::setLeftVauleLabelFixedWidth(int width)
+void KeyValueLabel::setLeftValueLabelFixedWidth(int width)
 {
     leftValueLabel->setFixedWidth(width);
 }
@@ -220,8 +233,11 @@ RightValueWidget::RightValueWidget(QWidget *parent)
 {
     setReadOnly(true);
     setFrameShape(QFrame::NoFrame);
-    setWordWrapMode(QTextOption::WrapAnywhere);
+    setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     setContextMenuPolicy(Qt::CustomContextMenu);
+
+    // Apply palette-based text color to prevent grayed-out appearance and support theme changes
+    updateTextPalette();
 
     connect(this, &RightValueWidget::customContextMenuRequested, this, &RightValueWidget::customContextMenuEvent);
 }
@@ -231,17 +247,53 @@ void RightValueWidget::setCompleteText(const QString &text)
     completeText = text;
 }
 
+void RightValueWidget::setForegroundRole(DPalette::ColorType role)
+{
+    if (currentforegroundRole != role) {
+        currentforegroundRole = role;
+        updateTextPalette();
+    }
+}
+
+void RightValueWidget::updateTextPalette()
+{
+    DPalette basePalette = DGuiApplicationHelper::instance()->applicationPalette();
+    DPalette widgetPalette = palette();
+
+    // Apply the requested foreground role color to the widget's Text role
+    if (currentforegroundRole != DPalette::NoType) {
+        QColor textColor = basePalette.color(currentforegroundRole);
+        widgetPalette.setColor(DPalette::Text, textColor);
+    } else {
+        // Default to normal text color
+        widgetPalette.setColor(DPalette::Text, basePalette.color(DPalette::Text));
+    }
+
+    setPalette(widgetPalette);
+}
+
+void RightValueWidget::changeEvent(QEvent *event)
+{
+    QTextEdit::changeEvent(event);
+
+    // Reapply palette when theme or palette changes
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange) {
+        updateTextPalette();
+    }
+}
+
 void RightValueWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     QTextEdit::mouseReleaseEvent(event);
-    Q_EMIT clicked();
+    // Only emit clicked signal when Ctrl key is pressed
+    if (event->modifiers() & Qt::ControlModifier) {
+        Q_EMIT clicked();
+    }
 }
 
 void RightValueWidget::showEvent(QShowEvent *event)
 {
-    if (!document()->toPlainText().isEmpty())
-        this->setFixedHeight(static_cast<int>(document()->size().height()) + 2);
-
+    setFixedHeight(static_cast<int>(document()->size().height()) + 2);
     QTextEdit::showEvent(event);
 }
 

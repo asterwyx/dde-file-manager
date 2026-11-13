@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,6 +10,7 @@
 #include <DSettingsDialog>
 
 class QCheckBox;
+class AliasComboBox;
 
 DCORE_BEGIN_NAMESPACE
 class DSettings;
@@ -23,16 +24,20 @@ class SettingDialog : public DSettingsDialog
 {
 public:
     explicit SettingDialog(QWidget *parent = nullptr);
+    void initialze();
     static void setItemVisiable(const QString &key, bool visiable);
 
 private:
     [[nodiscard]] static QPair<QWidget *, QWidget *> createAutoMountCheckBox(QObject *opt);
     [[nodiscard]] static QPair<QWidget *, QWidget *> createAutoMountOpenCheckBox(QObject *opt);
-    [[nodiscard]] static QPair<QWidget *, QWidget *> createCheckBoxWithMessage(QObject *opt);
+    [[nodiscard]] static QWidget *createCheckBoxWithMessage(QObject *opt);
     [[nodiscard]] static QPair<QWidget *, QWidget *> createPushButton(QObject *opt);
+    [[nodiscard]] static QPair<QWidget *, QWidget *> createSliderWithSideIcon(QObject *opt);
+    [[nodiscard]] static QPair<QWidget *, QWidget *> createPathComboboxItem(QObject *opt);
 
     static void mountCheckBoxStateChangedHandle(DSettingsOption *option, int state);
     static void autoMountCheckBoxChangedHandle(DSettingsOption *option, int state);
+    static bool pathComboBoxChangedHandle(AliasComboBox *acb, DSettingsOption *option, int index);
 
     void settingFilter(QByteArray &data);
     void loadSettings(const QString &templateFile);
@@ -43,6 +48,7 @@ private:
     static QPointer<QCheckBox> kAutoMountOpenCheckBox;
     static QSet<QString> kHiddenSettingItems;
     QPointer<DSettings> dtkSettings;
+    static quint64 parentWid;
 };
 }
 #endif   // DFMSETTINGDIALOG_H

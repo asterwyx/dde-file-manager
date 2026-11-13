@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,6 +11,7 @@
 #include <QColor>
 
 class QPainter;
+class QWidget;
 
 namespace dfmplugin_tag {
 
@@ -44,27 +45,27 @@ public:
 
     static QList<QUrl> commonUrls(const QList<QUrl> &urls);
 
-    QList<QColor> defualtColors() const;
+    QList<QColor> defaultColors() const;
 
-    QColor qureyColorByColorName(const QString &name) const;
-    QColor qureyColorByDisplayName(const QString &name) const;
-    QString qureyColorNameByColor(const QColor &color) const;
-    QString qureyIconNameByColorName(const QString &colorName) const;
-    QString qureyIconNameByColor(const QColor &color) const;
-    QString qureyDisplayNameByColor(const QColor &color) const;
-    QString qureyColorNameByDisplayName(const QString &name) const;
+    QColor queryColorByColorName(const QString &name) const;
+    QColor queryColorByDisplayName(const QString &name) const;
+    QString queryColorNameByColor(const QColor &color) const;
+    QString queryIconNameByColorName(const QString &colorName) const;
+    QString queryIconNameByColor(const QColor &color) const;
+    QString queryDisplayNameByColor(const QColor &color) const;
+    QString queryColorNameByDisplayName(const QString &name) const;
 
     QString getTagNameFromUrl(const QUrl &url) const;
     QUrl makeTagUrlByTagName(const QString &tag) const;
 
     QString getColorNameByTag(const QString &tagName) const;
-    bool isDefualtTag(const QString &tagName) const;
+    bool isDefaultTag(const QString &tagName) const;
 
     void paintTags(QPainter *painter, QRectF &rect, const QList<QColor> &colors) const;
 
     QVariantMap createSidebarItemInfo(const QString &tag);
 
-    void showTagEdit(const QRectF &parentRect, const QRectF &iconRect, const QList<QUrl> &fileList, bool showInTagDir = false);
+    void showTagEdit(QWidget *parent, const QRectF &viewRect, const QRectF &iconRect, const QList<QUrl> &fileList, bool showInTagDir = false);
 
     void crumbEditInputFilter(DTK_WIDGET_NAMESPACE::DCrumbEdit *edit);
 

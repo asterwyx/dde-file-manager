@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -18,11 +18,7 @@ class VaultDBusUtils : public QObject
 public:
     static VaultDBusUtils *instance();
 
-    static QVariant vaultManagerDBusCall(QString function, const QVariant &vaule = {});
-
-    static VaultPolicyState getVaultPolicy();
-
-    static bool setVaultPolicyState(int policyState);
+    static QVariant vaultManagerDBusCall(QString function, const QVariant &value = {});
 
     static void lockEventTriggered(QObject *obj, const char *cslot = nullptr);
 

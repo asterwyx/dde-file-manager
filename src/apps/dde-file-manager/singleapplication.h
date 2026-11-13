@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,6 +26,9 @@ public slots:
     void handleConnection();
     void readData();
     void closeServer();
+
+protected:
+    virtual void handleQuitAction() override;
 
 private:
     static QLocalSocket *getNewClientConnect(const QString &key, const QByteArray &message);

@@ -1,6 +1,6 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LGPL-3.0-or-later
 
 #ifndef DFMEXTACTIONPRIVATE_H
 #define DFMEXTACTIONPRIVATE_H
@@ -30,6 +30,9 @@ public:
 
     virtual void setToolTip(const std::string &tip) = 0;
     virtual std::string toolTip() const = 0;
+
+    virtual void setActionId(const std::string &actionId) = 0;
+    virtual std::string actionId() const = 0;
 
     virtual void setMenu(DFMExtMenu *menu) = 0;
     virtual DFMExtMenu *menu() const = 0;

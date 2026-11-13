@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,11 +16,6 @@ public:
     explicit VaultVisibleManager(QObject *parent = nullptr);
 
 public:
-    /*!
-     * \brief isVaultEnabled
-     * \return true vault is available, vice versa.
-     */
-    bool isVaultEnabled();
     void infoRegister();
     void pluginServiceRegister();
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -43,11 +43,13 @@ void MountAskPasswordDialog::initUI()
     anonmymousButtonBox->setEnabled(true);
     anonymousButton = new DButtonBoxButton(tr("Anonymous"));
     anonymousButton->setObjectName("AnonymousButton");
+    anonymousButton->setAccessibleName("AnonymousButton");
     anonymousButton->setCheckable(true);
     anonymousButton->setMinimumWidth(100);
     anonymousButton->setFocusPolicy(Qt::NoFocus);
     registerButton = new DButtonBoxButton(tr("Registered user"));
     registerButton->setObjectName("RegisterButton");
+    registerButton->setAccessibleName("RegisterButton");
     registerButton->setCheckable(true);
     registerButton->setMinimumWidth(100);
     registerButton->setFocusPolicy(Qt::NoFocus);
@@ -66,6 +68,8 @@ void MountAskPasswordDialog::initUI()
     usernameLable->setFixedWidth(95);
 
     usernameLineEdit = new QLineEdit;
+    usernameLineEdit->setObjectName("UsernameLineEdit");
+    usernameLineEdit->setAccessibleName("UsernameLineEdit");
     usernameLineEdit->setMinimumWidth(240);
     usernameLineEdit->setText(qgetenv("USER"));
 
@@ -74,6 +78,8 @@ void MountAskPasswordDialog::initUI()
     domainLabel->setFixedWidth(95);
 
     domainLineEdit = new QLineEdit;
+    domainLineEdit->setObjectName("DomainLineEdit");
+    domainLineEdit->setAccessibleName("DomainLineEdit");
     domainLineEdit->setMinimumWidth(240);
     domainLineEdit->setText("WORKGROUP");
 
@@ -82,13 +88,18 @@ void MountAskPasswordDialog::initUI()
     passwordLable->setFixedWidth(90);
 
     passwordLineEdit = new DPasswordEdit;
+    passwordLineEdit->setObjectName("PasswordLineEdit");
+    passwordLineEdit->setAccessibleName("PasswordLineEdit");
     passwordLineEdit->setMinimumWidth(240);
     passwordLineEdit->setAttribute(Qt::WA_InputMethodEnabled, false);
 
     passwordButtonGroup = new QButtonGroup(this);
+    passwordButtonGroup->setObjectName("PasswordButtonGroup");
     passwordButtonGroup->setExclusive(true);
 
     passwordCheckBox = new QCheckBox();
+    passwordCheckBox->setObjectName("PasswordCheckBox");
+    passwordCheckBox->setAccessibleName("PasswordCheckBox");
     QWidget *empty = new QWidget();
     passwordCheckBox->setText(tr("Remember password"));
 
@@ -168,7 +179,7 @@ void MountAskPasswordDialog::handleConnect()
     if (passwordCheckBox->isChecked()) {
         loginObj.insert(kPasswdSaveMode, kSavePermanently);
     } else {
-        loginObj.insert(kPasswdSaveMode, kSaveBeforeLogout);   // kSaveBeforeLogout is used as default, for auth one time
+        loginObj.insert(kPasswdSaveMode, kNeverSave);
     }
     accept();
 }

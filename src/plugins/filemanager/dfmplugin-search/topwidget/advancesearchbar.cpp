@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,15 +6,17 @@
 #include "advancesearchbar_p.h"
 #include "utils/searchhelper.h"
 #include "utils/custommanager.h"
-#include "events/searcheventcaller.h"
 
 #include <dfm-base/widgets/filemanagerwindowsmanager.h>
 #include <dfm-base/interfaces/fileinfo.h>
 #include <dfm-base/utils/universalutils.h>
+#include <dfm-base/base/schemefactory.h>
+#include <dfm-base/mimetype/mimetypedisplaymanager.h>
 
 #include <dfm-framework/dpf.h>
 
-#include <DApplicationHelper>
+#include <QFileInfo>
+
 #include <DCommandLinkButton>
 #include <DHorizontalLine>
 #include <DLabel>
@@ -25,7 +27,7 @@
 #include <dtkwidget_global.h>
 #ifdef DTKWIDGET_CLASS_DSizeMode
 #    include <DSizeMode>
-#include <QGraphicsEffect>
+#    include <QGraphicsEffect>
 #endif
 
 DFMBASE_USE_NAMESPACE
@@ -140,7 +142,7 @@ void AdvanceSearchBarPrivate::initUI()
     formLayout->addWidget(asbCombos[kCreateDateRange], 1, 7);
 
     formLayout->setSpacing(6);
-    formLayout->setMargin(6);
+    formLayout->setContentsMargins(6, 6, 6, 6);
 
     QVBoxLayout *vLayout = new QVBoxLayout(this);
     vLayout->addSpacing(10);
@@ -153,7 +155,7 @@ void AdvanceSearchBarPrivate::initUI()
     q->setWidget(this);
     q->setFrameShape(QFrame::NoFrame);
     q->setAutoFillBackground(true);   // 允许自动填充背景
-    updateBackgroundColor();
+    q->setBackgroundRole(QPalette::Base);
     // 启用横向滚动条
     q->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     // 禁用竖向滚动条
@@ -162,7 +164,6 @@ void AdvanceSearchBarPrivate::initUI()
 
 void AdvanceSearchBarPrivate::initConnection()
 {
-    connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::themeTypeChanged, this, &AdvanceSearchBarPrivate::updateBackgroundColor);
     connect(resetBtn, &DCommandLinkButton::pressed, q, &AdvanceSearchBar::onResetButtonPressed);
 
     for (int i = 0; i < kLabelCount; i++) {
@@ -173,18 +174,21 @@ void AdvanceSearchBarPrivate::initConnection()
 void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
 {
     if (!contains(url)) {
+        fmDebug() << "URL not found in cache, resetting form";
         q->resetForm();
         return;
     }
 
-    static QMap<QVariant, int> dateRangeMap { { 1, 1 },
-                                              { 2, 2 },
-                                              { 7, 3 },
-                                              { 14, 4 },
-                                              { 30, 5 },
-                                              { 60, 6 },
-                                              { 365, 7 },
-                                              { 730, 8 } };
+    static QMap<int, int> dateRangeMap {
+        { 1, 1 },
+        { 2, 2 },
+        { 7, 3 },
+        { 14, 4 },
+        { 30, 5 },
+        { 60, 6 },
+        { 365, 7 },
+        { 730, 8 }
+    };
 
     static QMap<QPair<quint64, quint64>, int> sizeRangeMap { { QPair<quint64, quint64>(0, 100), 1 },
                                                              { QPair<quint64, quint64>(100, 1024), 2 },
@@ -195,6 +199,9 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
 
     blockSignals(true);
     FilterData filter = filterInfoCache[url];
+
+    fmDebug() << "Applying cached filter data for URL:" << url.toString();
+
     // 搜索范围
     const auto &searchRange = filter[kSearchRange];
     asbCombos[kSearchRange]->setCurrentIndex(searchRange.toBool() ? 0 : 1);
@@ -203,6 +210,7 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
     const auto &fileType = filter[kFileType];
     if (fileType.isValid()) {
         asbCombos[kFileType]->setCurrentText(fileType.toString());
+        fmDebug() << "Set file type filter to:" << fileType.toString();
     } else {
         asbCombos[kFileType]->setCurrentIndex(0);
     }
@@ -212,6 +220,7 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
     if (sizeRange.isValid() && sizeRange.canConvert<QPair<quint64, quint64>>()) {
         auto range = sizeRange.value<QPair<quint64, quint64>>();
         asbCombos[kSizeRange]->setCurrentIndex(sizeRangeMap[range]);
+        fmDebug() << "Set size range filter:" << range.first << "KB to" << range.second << "KB";
     } else {
         asbCombos[kSizeRange]->setCurrentIndex(0);
     }
@@ -219,7 +228,9 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
     // 修改时间
     const auto &dateRange = filter[kDateRange];
     if (dateRange.isValid()) {
-        asbCombos[kDateRange]->setCurrentIndex(dateRangeMap[dateRange]);
+        int days = dateRange.toInt();
+        asbCombos[kDateRange]->setCurrentIndex(dateRangeMap.value(days, 0));
+        fmDebug() << "Set date range filter to" << days << "days";
     } else {
         asbCombos[kDateRange]->setCurrentIndex(0);
     }
@@ -227,7 +238,9 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
     // 访问时间
     const auto &accessDateRange = filter[kAccessDateRange];
     if (accessDateRange.isValid()) {
-        asbCombos[kAccessDateRange]->setCurrentIndex(dateRangeMap[accessDateRange]);
+        int days = accessDateRange.toInt();
+        asbCombos[kAccessDateRange]->setCurrentIndex(dateRangeMap.value(days, 0));
+        fmDebug() << "Set access date range filter to" << days << "days";
     } else {
         asbCombos[kAccessDateRange]->setCurrentIndex(0);
     }
@@ -235,7 +248,9 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
     // 创建时间
     const auto &createDateRange = filter[kCreateDateRange];
     if (createDateRange.isValid()) {
-        asbCombos[kCreateDateRange]->setCurrentIndex(dateRangeMap[createDateRange]);
+        int days = createDateRange.toInt();
+        asbCombos[kCreateDateRange]->setCurrentIndex(dateRangeMap.value(days, 0));
+        fmDebug() << "Set create date range filter to" << days << "days";
     } else {
         asbCombos[kCreateDateRange]->setCurrentIndex(0);
     }
@@ -246,8 +261,10 @@ void AdvanceSearchBarPrivate::refreshOptions(const QUrl &url)
 
 bool AdvanceSearchBarPrivate::contains(const QUrl &url)
 {
-    if (filterInfoCache.contains(url))
+    if (filterInfoCache.contains(url)) {
+        fmDebug() << "URL found directly in cache:" << url.toString();
         return true;
+    }
 
     // If there is an entry in `filterInfoCache `that is the same as winId and targetUrl in `url`,
     // then it is considered that `filterInfoCache` contains `url`.
@@ -260,8 +277,10 @@ bool AdvanceSearchBarPrivate::contains(const QUrl &url)
         return (tmpWinId == winId && UniversalUtils::urlEquals(tmpTargetUrl, targetUrl));
     });
 
-    if (iter == keys.end())
+    if (iter == keys.end()) {
+        fmDebug() << "URL not found in cache with winId:" << winId << "targetUrl:" << targetUrl.toString();
         return false;
+    }
 
     // update and return true
     auto cache = filterInfoCache.take(*iter);
@@ -276,8 +295,12 @@ void AdvanceSearchBarPrivate::saveOptions(QMap<int, QVariant> &options)
     Q_ASSERT(window);
 
     const auto &url = window->currentUrl();
-    if (!url.isValid())
+    if (!url.isValid()) {
+        fmWarning() << "Cannot save search options: invalid current URL";
         return;
+    }
+
+    fmDebug() << "Saving search options for winId:" << winId << "URL:" << url.toString();
 
     if (!currentSearchUrl.isValid() || !SearchHelper::isSearchFile(currentSearchUrl)) {
         if (!SearchHelper::isSearchFile(url)) {
@@ -292,37 +315,29 @@ void AdvanceSearchBarPrivate::saveOptions(QMap<int, QVariant> &options)
     filterInfoCache[currentSearchUrl] = options;
 }
 
-void AdvanceSearchBarPrivate::updateBackgroundColor()
-{
-    QPalette palette = q->palette();
-
-    QColor bgColor;
-    if (DGuiApplicationHelper::instance()->themeType() == DGuiApplicationHelper::LightType)
-        bgColor.setRgb(255, 255, 255);
-    else
-        bgColor.setRgb(40, 40, 40);
-
-    palette.setColor(QPalette::Background, bgColor);
-    q->setPalette(palette);
-}
-
-bool AdvanceSearchBarPrivate::shouldVisiableByFilterRule(FileInfo *info, QVariant data)
+bool AdvanceSearchBarPrivate::shouldVisiableByFilterRule(SortFileInfo *info, QVariant data)
 {
     if (!data.isValid())
         return true;
 
     auto filterData = data.value<FilterData>();
     // 如果是重置过滤条件，则都显示
-    const auto &iter = std::find_if(filterData.begin() + 1, filterData.begin() + kLabelCount, [](const QVariant &value) {
+    const auto &iter = std::find_if(std::next(filterData.begin()), std::next(filterData.begin(), kLabelCount), [](const QVariant &value) {
         return value.isValid();
     });
-    if (filterData[kSearchRange].toBool() && (iter == filterData.begin() + kLabelCount || iter == filterData.end()))
+    if (filterData[kSearchRange].toBool() && (iter == std::next(filterData.begin(), kLabelCount) || iter == filterData.end()))
         return true;
 
     if (!info)
         return false;
+    // 检查文件是否存在，如果不存在则直接过滤掉
+    const auto &fileUrl = info->fileUrl();
+    if (fileUrl.isLocalFile() && !QFileInfo(fileUrl.toLocalFile()).exists())
+        return false;
 
     const auto &filter = parseFilterData(filterData);
+
+    // 检查搜索范围过滤
     if (SearchHelper::isSearchFile(filter.currentUrl) && filter.comboValid[kSearchRange] && !filter.includeSubDir) {
         const QUrl &parentUrl = SearchHelper::searchTargetUrl(filter.currentUrl);
         QString parentPath = CustomManager::instance()->redirectedPath(parentUrl);
@@ -332,7 +347,7 @@ bool AdvanceSearchBarPrivate::shouldVisiableByFilterRule(FileInfo *info, QVarian
         if (!parentPath.endsWith("/"))
             parentPath += '/';
 
-        QString filePath = info->pathOf(PathInfoType::kFilePath);
+        QString filePath = info->fileUrl().path();
         int index = filePath.indexOf(parentPath);
         if (index != -1) {
             int indexWithoutParent = index + parentPath.length();
@@ -342,15 +357,28 @@ bool AdvanceSearchBarPrivate::shouldVisiableByFilterRule(FileInfo *info, QVarian
         }
     }
 
+    // 检查文件类型过滤
     if (filter.comboValid[kFileType]) {
-        QString fileTypeStr = info->displayOf(DisPlayInfoType::kMimeTypeDisplayName);
+        // 内联 getLocalPath + accurateDisplayType 逻辑
+        const QUrl &fileUrl = info->fileUrl();
+        QString path;
+        if (fileUrl.isLocalFile()) {
+            path = fileUrl.toLocalFile();
+        } else {
+            auto fileInfo = dfmbase::InfoFactory::create<dfmbase::FileInfo>(fileUrl);
+            if (fileInfo && fileInfo->canAttributes(dfmbase::FileInfo::FileCanType::kCanRedirectionFileUrl)) {
+                path = fileInfo->urlOf(dfmbase::UrlInfoType::kRedirectedFileUrl).toLocalFile();
+            }
+        }
+        QString fileTypeStr = dfmbase::MimeTypeDisplayManager::instance()->accurateDisplayTypeFromPath(path);
         if (!fileTypeStr.startsWith(filter.typeString))
             return false;
     }
 
+    // 检查文件大小过滤
     if (filter.comboValid[kSizeRange]) {
         // note: FileSizeInKiloByteRole is the size of Byte, not KB!
-        quint64 fileSize = static_cast<quint64>(info->size());
+        quint64 fileSize = static_cast<quint64>(info->fileSize());
         quint32 blockSize = 1 << 10;
         quint64 lower = filter.sizeRange.first * blockSize;
         quint64 upper = filter.sizeRange.second * blockSize;
@@ -359,20 +387,23 @@ bool AdvanceSearchBarPrivate::shouldVisiableByFilterRule(FileInfo *info, QVarian
             return false;
     }
 
+    // 检查修改时间过滤
     if (filter.comboValid[kDateRange]) {
-        QDateTime filemtime = info->timeOf(TimeInfoType::kLastModified).value<QDateTime>();
+        QDateTime filemtime = QDateTime::fromSecsSinceEpoch(info->lastModifiedTime());
         if (filemtime < filter.dateRangeStart || filemtime > filter.dateRangeEnd)
             return false;
     }
 
+    // 检查访问时间过滤
     if (filter.comboValid[kAccessDateRange]) {
-        QDateTime filemtime = info->timeOf(TimeInfoType::kLastRead).value<QDateTime>();
+        QDateTime filemtime = QDateTime::fromSecsSinceEpoch(info->lastReadTime());
         if (filemtime < filter.accessDateRangeStart || filemtime > filter.accessDateRangeEnd)
             return false;
     }
 
+    // 检查创建时间过滤
     if (filter.comboValid[kCreateDateRange]) {
-        QDateTime filemtime = info->timeOf(TimeInfoType::kCreateTime).value<QDateTime>();
+        QDateTime filemtime = QDateTime::fromSecsSinceEpoch(info->createTime());
         if (filemtime < filter.createDateRangeStart || filemtime > filter.createDateRangeEnd)
             return false;
     }
@@ -406,36 +437,36 @@ AdvanceSearchBarPrivate::FileFilter AdvanceSearchBarPrivate::parseFilterData(con
 
             switch (dateRange) {
             case 1:
-                startTime = QDateTime(today);
-                endTime = QDateTime(tomorrow);
+                startTime = today.startOfDay();
+                endTime = tomorrow.startOfDay();
                 break;
             case 2:
-                startTime = QDateTime(today).addDays(-1);
-                endTime = QDateTime(today);
+                startTime = today.addDays(-1).startOfDay();
+                endTime = today.startOfDay();
                 break;
             case 7:
-                startTime = QDateTime(today).addDays(0 - dayDist);
-                endTime = QDateTime(tomorrow);
+                startTime = today.addDays(0 - dayDist).startOfDay();
+                endTime = tomorrow.startOfDay();
                 break;
             case 14:
-                startTime = QDateTime(today).addDays(-7 - dayDist);
-                endTime = QDateTime(today).addDays(0 - dayDist);
+                startTime = today.addDays(-7 - dayDist).startOfDay();
+                endTime = today.addDays(0 - dayDist).startOfDay();
                 break;
             case 30:
-                startTime = QDateTime(QDate(today.year(), today.month(), 1));
-                endTime = QDateTime(tomorrow);
+                startTime = QDate(today.year(), today.month(), 1).startOfDay();
+                endTime = tomorrow.startOfDay();
                 break;
             case 60:
-                startTime = QDateTime(QDate(today.year(), today.month(), 1)).addMonths(-1);
-                endTime = QDateTime(QDate(today.year(), today.month(), 1));
+                startTime = QDate(today.year(), today.month(), 1).addMonths(-1).startOfDay();
+                endTime = QDate(today.year(), today.month(), 1).startOfDay();
                 break;
             case 365:
-                startTime = QDateTime(QDate(today.year(), 1, 1));
-                endTime = QDateTime(tomorrow);
+                startTime = QDate(today.year(), 1, 1).startOfDay();
+                endTime = tomorrow.startOfDay();
                 break;
             case 730:
-                startTime = QDateTime(QDate(today.year(), 1, 1)).addYears(-1);
-                endTime = QDateTime(QDate(today.year(), 1, 1));
+                startTime = QDate(today.year(), 1, 1).addYears(-1).startOfDay();
+                endTime = QDate(today.year(), 1, 1).startOfDay();
                 break;
             default:
                 break;
@@ -517,12 +548,17 @@ void AdvanceSearchBar::onResetButtonPressed()
 
 void AdvanceSearchBar::hideEvent(QHideEvent *event)
 {
+    fmDebug() << "AdvanceSearchBar hidden, cleaning up resources";
+
     auto winId = FMWindowsIns.findWindowId(this);
     auto window = FMWindowsIns.findWindowById(winId);
     if (window && !window->isMinimized()) {
+        fmDebug() << "Resetting form and clearing cache on hide";
         resetForm();
         d->filterInfoCache.clear();
         d->currentSearchUrl = QUrl();
+    } else {
+        fmDebug() << "Window minimized or not found, skipping cleanup";
     }
 
     QScrollArea::hideEvent(event);

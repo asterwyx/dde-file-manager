@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,10 +16,13 @@
 #include <QProcess>
 #include <QDBusReply>
 #include <QVBoxLayout>
+#include <QEvent>
 
 DFMBASE_USE_NAMESPACE
 using namespace dfmbase;
 DWIDGET_USE_NAMESPACE
+
+static constexpr int kMaxSmbPasswordLength { 127 };
 
 UserSharePasswordSettingDialog::UserSharePasswordSettingDialog(QWidget *parent)
     : DDialog(parent)
@@ -31,6 +34,7 @@ UserSharePasswordSettingDialog::UserSharePasswordSettingDialog(QWidget *parent)
 
 void UserSharePasswordSettingDialog::initializeUi()
 {
+    setMinimumWidth(380);
     QStringList buttonTexts;
     buttonTexts.append(QObject::tr("Cancel", "button"));
     buttonTexts.append(QObject::tr("Confirm", "button"));
@@ -46,6 +50,9 @@ void UserSharePasswordSettingDialog::initializeUi()
     editAreaLay->setContentsMargins(0, 20, 0, 6);
 
     passwordEdit = new Dtk::Widget::DPasswordEdit(this);
+    passwordEdit->setObjectName("PasswordEdit_2");
+    passwordEdit->setAccessibleName("PasswordEdit_2");
+    passwordEdit->lineEdit()->setMaxLength(kMaxSmbPasswordLength);
     editAreaLay->addWidget(passwordEdit);
     DLabel *notice = new DLabel(tr("Set a password on the shared folder for non-anonymous access"), this);
     DFontSizeManager::instance()->bind(notice, DFontSizeManager::SizeType::T8);
@@ -86,4 +93,13 @@ void UserSharePasswordSettingDialog::onButtonClicked(const int &index)
         Q_EMIT inputPassword(password);
     }
     close();
+}
+
+void UserSharePasswordSettingDialog::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::FontChange) {
+        adjustSize();
+    }
+
+    DDialog::changeEvent(event);
 }

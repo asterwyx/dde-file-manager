@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "syncfileinfo.h"
+#include "localfileinfodefs.h"
 #include "private/syncfileinfo_p.h"
 
 #include <dfm-base/base/urlroute.h>
@@ -10,10 +11,12 @@
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/utils/chinese2pinyin.h>
 #include <dfm-base/utils/sysinfoutils.h>
+#include <dfm-base/utils/iconutils.h>
 #include <dfm-base/file/local/localfileiconprovider.h>
 #include <dfm-base/mimetype/mimetypedisplaymanager.h>
 #include <dfm-base/base/application/application.h>
 #include <dfm-base/utils/thumbnail/thumbnailfactory.h>
+#include <dfm-base/utils/protocolutils.h>
 
 #include <dfm-io/dfmio_utils.h>
 #include <dfm-io/dfileinfo.h>
@@ -61,6 +64,7 @@ SyncFileInfo::~SyncFileInfo()
  */
 bool SyncFileInfo::operator==(const SyncFileInfo &fileinfo) const
 {
+    QMutexLocker locker(&d->lock);
     return d->dfmFileInfo == fileinfo.d->dfmFileInfo && url == fileinfo.url;
 }
 /*!
@@ -77,6 +81,7 @@ bool SyncFileInfo::operator!=(const SyncFileInfo &fileinfo) const
 
 bool SyncFileInfo::initQuerier()
 {
+    QMutexLocker locker(&d->lock);
     if (d->dfmFileInfo)
         return d->dfmFileInfo->initQuerier();
     return false;
@@ -84,8 +89,17 @@ bool SyncFileInfo::initQuerier()
 
 void SyncFileInfo::initQuerierAsync(int ioPriority, FileInfo::initQuerierAsyncCallback func, void *userData)
 {
-    if (d->dfmFileInfo)
-        d->dfmFileInfo->initQuerierAsync(ioPriority, func, userData);
+    if (!func)
+        return;
+
+    auto lockGuard = std::make_shared<std::unique_lock<QMutex>>(d->lock);
+    if (d->dfmFileInfo) {
+        auto wrapper = [lockGuard, func](bool success, void *data) {
+            lockGuard->unlock();
+            func(success, data);
+        };
+        d->dfmFileInfo->initQuerierAsync(ioPriority, wrapper, userData);
+    }
 }
 /*!
  * \brief exists 文件是否存在
@@ -111,26 +125,32 @@ void SyncFileInfo::refresh()
         QWriteLocker locker(&extendOtherCacheLock);
         extendOtherCache.clear();
     }
-    QWriteLocker locker(&d->lock);
-    d->dfmFileInfo->refresh();
-    d->fileMimeTypeFuture.reset(nullptr);
-    d->mediaFuture.reset(nullptr);
-    d->fileType = FileInfo::FileType::kUnknown;
-    d->mimeTypeMode = QMimeDatabase::MatchMode::MatchDefault;
-    d->extraProperties.clear();
-    d->attributesExtend.clear();
-    d->extendIDs.clear();
-    d->isLocalDevice = QVariant();
-    d->isCdRomDevice = QVariant();
-    d->mimeType = QMimeType();
-    d->mimeTypeMode = QMimeDatabase::MatchDefault;
-    d->cacheAttributes.clear();
-    d->fileIcon = QIcon();
+    {
+        QMutexLocker locker(&d->lock);
+        d->dfmFileInfo->refresh();
+        d->fileMimeTypeFuture.reset(nullptr);
+        d->mediaFuture.reset(nullptr);
+        d->fileType = FileInfo::FileType::kUnknown;
+        d->mimeTypeMode = QMimeDatabase::MatchMode::MatchDefault;
+        d->extraProperties.clear();
+        d->attributesExtend.clear();
+        d->extendIDs.clear();
+        d->isLocalDevice = QVariant();
+        d->isCdRomDevice = QVariant();
+        d->mimeType = QMimeType();
+        d->mimeTypeMode = QMimeDatabase::MatchDefault;
+        d->cacheAttributes.clear();
+    }
+    {
+        QWriteLocker iconLocker(&d->iconLock);
+        d->fileIconName.clear();
+        d->fileIcon = QIcon();
+    }
 }
 
 void SyncFileInfo::cacheAttribute(DFileInfo::AttributeID id, const QVariant &value)
 {
-    QWriteLocker locker(&d->lock);
+    QMutexLocker locker(&d->lock);
     d->cacheAttributes.insert(id, value);
 }
 
@@ -139,6 +159,8 @@ QString SyncFileInfo::nameOf(const NameInfoType type) const
     switch (type) {
     case FileNameInfoType::kFileName:
         return d->fileName();
+    case FileNameInfoType::kBaseName:
+        return d->baseName();
     case FileNameInfoType::kCompleteBaseName:
         return d->completeBaseName();
     case FileNameInfoType::kCompleteSuffix:
@@ -166,8 +188,6 @@ QString SyncFileInfo::pathOf(const PathInfoType type) const
     case FilePathInfoType::kFilePath:
         [[fallthrough]];
     case FilePathInfoType::kAbsoluteFilePath:
-        [[fallthrough]];
-    case FilePathInfoType::kCanonicalPath:
         return d->filePath();
     case FilePathInfoType::kPath:
         [[fallthrough]];
@@ -217,8 +237,6 @@ bool SyncFileInfo::isAttributes(const OptInfoType type) const
         return d->filePath() == "/";
     case FileIsType::kIsBundle:
         return QFileInfo(url.path()).isBundle();
-    case FileIsType::kIsPrivate:
-        return d->isPrivate();
     default:
         return FileInfo::isAttributes(type);
     }
@@ -236,9 +254,14 @@ bool SyncFileInfo::canAttributes(const CanableInfoType type) const
     case FileCanType::kCanRename:
         return d->canRename();
     case FileCanType::kCanHidden:
-        if (FileUtils::isGphotoFile(url))
+        if (ProtocolUtils::isGphotoFile(url))
             return false;
         return true;
+    case FileCanType::kCanMoveOrCopy:
+        // file can not read or dir can not execte
+        if (!d->attribute(DFileInfo::AttributeID::kAccessCanRead).toBool() || (d->attribute(DFileInfo::AttributeID::kStandardIsDir).toBool() && !d->attribute(DFileInfo::AttributeID::kAccessCanExecute).toBool()))
+            return false;
+        return FileInfo::canAttributes(type);
     default:
         return FileInfo::canAttributes(type);
     }
@@ -266,7 +289,6 @@ QVariant SyncFileInfo::extendAttributes(const ExtInfoType type) const
     case FileExtendedInfoType::kGroupId:
         return d->attribute(DFileInfo::AttributeID::kUnixGID);
     default:
-        QReadLocker(&d->lock);
         return FileInfo::extendAttributes(type);
     }
 }
@@ -298,8 +320,8 @@ QFileDevice::Permissions SyncFileInfo::permissions() const
 {
     QFileDevice::Permissions ps;
 
+    QMutexLocker locker(&d->lock);
     if (d->dfmFileInfo) {
-        QReadLocker locker(&d->lock);
         ps = static_cast<QFileDevice::Permissions>(static_cast<uint16_t>(d->dfmFileInfo->permissions()));
     }
 
@@ -372,7 +394,7 @@ SyncFileInfo::FileType SyncFileInfo::fileType() const
 {
     FileType fileType { FileType::kUnknown };
     {
-        QReadLocker locker(&d->lock);
+        QMutexLocker locker(&d->lock);
         if (d->fileType != FileInfo::FileType::kUnknown) {
             fileType = FileType(d->fileType);
             return fileType;
@@ -409,6 +431,7 @@ QString SyncFileInfo::displayOf(const DisPlayInfoType type) const
  */
 QVariantHash SyncFileInfo::extraProperties() const
 {
+    QMutexLocker locker(&d->lock);
     return d->extraProperties;
 }
 
@@ -431,14 +454,14 @@ QMimeType SyncFileInfo::fileMimeType(QMimeDatabase::MatchMode mode /*= QMimeData
     QMimeType type;
     QMimeDatabase::MatchMode modeCache { QMimeDatabase::MatchMode::MatchDefault };
     {
-        QReadLocker locker(&d->lock);
+        QMutexLocker locker(&d->lock);
         type = d->mimeType;
         modeCache = d->mimeTypeMode;
     }
 
     if (!type.isValid() || modeCache != mode) {
         type = d->mimeTypes(url.path(), mode);
-        QWriteLocker locker(&d->lock);
+        QMutexLocker locker(&d->lock);
         d->mimeType = type;
         d->mimeTypeMode = mode;
     }
@@ -451,21 +474,21 @@ QMimeType SyncFileInfo::fileMimeTypeAsync(QMimeDatabase::MatchMode mode)
     QMimeType type;
     QMimeDatabase::MatchMode modeCache { QMimeDatabase::MatchMode::MatchDefault };
 
-    QReadLocker rlk(&d->lock);
+    QMutexLocker locker(&d->lock);
     type = d->mimeType;
     modeCache = d->mimeTypeMode;
 
-    if (!d->fileMimeTypeFuture && (!type.isValid() || modeCache != mode)) {
-        rlk.unlock();
+    if (d->fileMimeTypeFuture.isNull() && (!type.isValid() || modeCache != mode)) {
+        locker.unlock();
         auto future = FileInfoHelper::instance().fileMimeTypeAsync(url, mode, QString(), false);
-        QWriteLocker wlk(&d->lock);
+        QMutexLocker locker(&d->lock);
         d->mimeType = type;
         d->mimeTypeMode = mode;
         d->fileMimeTypeFuture = future;
-    } else if (d->fileMimeTypeFuture->finish) {
+    } else if (!d->fileMimeTypeFuture.isNull() && d->fileMimeTypeFuture->finish) {
         type = d->fileMimeTypeFuture->data.value<QMimeType>();
-        rlk.unlock();
-        QWriteLocker wlk(&d->lock);
+        locker.unlock();
+        QMutexLocker locker(&d->lock);
         d->mimeType = type;
         d->mimeTypeMode = mode;
     }
@@ -477,7 +500,7 @@ QString SyncFileInfo::viewOfTip(const ViewType type) const
 {
     if (type == ViewType::kEmptyDir) {
         if (!exists()) {
-            return QObject::tr("File has been moved or deleted");
+            return QObject::tr("File or directory not found");
         } else if (!isAttributes(FileIsType::kIsReadable)) {
             return QObject::tr("You do not have permission to access this folder");
         } else if (isAttributes(FileIsType::kIsDir)) {
@@ -491,8 +514,8 @@ QString SyncFileInfo::viewOfTip(const ViewType type) const
 
 QVariant SyncFileInfo::customAttribute(const char *key, const DFileInfo::DFileAttributeType type)
 {
+    QMutexLocker locker(&d->lock);
     if (d->dfmFileInfo) {
-        QReadLocker locker(&d->lock);
         return d->dfmFileInfo->customAttribute(key, type);
     }
     return QVariant();
@@ -505,7 +528,7 @@ QMap<DFMIO::DFileInfo::AttributeExtendID, QVariant> SyncFileInfo::mediaInfoAttri
 
 void SyncFileInfo::setExtendedAttributes(const FileExtendedInfoType &key, const QVariant &value)
 {
-    QWriteLocker locker(&d->lock);
+    QMutexLocker locker(&d->lock);
     switch (key) {
     case FileExtendedInfoType::kFileLocalDevice:
         d->isLocalDevice = value;
@@ -529,7 +552,7 @@ void SyncFileInfo::updateAttributes(const QList<FileInfo::FileInfoAttributeID> &
     auto typeAll = types;
     if (typeAll.isEmpty()) {
         if (isAttributes(OptInfoType::kIsSymLink)) {
-            auto target = d->symLinkTarget();
+            auto target = FileUtils::resolveSymlink(fileUrl());
             if (!target.isEmpty() && target != filePath()) {
                 FileInfoPointer info = InfoFactory::create<FileInfo>(QUrl::fromLocalFile(target));
                 if (info)
@@ -544,23 +567,22 @@ void SyncFileInfo::updateAttributes(const QList<FileInfo::FileInfoAttributeID> &
         typeAll.append(FileInfoAttributeID::kFileMimeType);
 
         typeAll.append(FileInfoAttributeID::kStandardSize);
+
+        QWriteLocker locker(&extendOtherCacheLock);
+        extendOtherCache.remove(ExtInfoType::kFileCanTag);
+        extendOtherCache.remove(ExtInfoType::kFileEmblems);
     }
     // 更新缩略图
     if (typeAll.contains(FileInfoAttributeID::kThumbnailIcon)) {
         typeAll.removeOne(FileInfoAttributeID::kThumbnailIcon);
-        ThumbnailFactory::instance()->joinThumbnailJob(url, Global::kLarge);
-    }
-
-    // 更新filetype
-    if (typeAll.contains(FileInfoAttributeID::kStandardFileType)) {
-        typeAll.removeOne(FileInfoAttributeID::kStandardFileType);
-        d->updateFileType();
+        ThumbnailFactory::instance()->joinThumbnailJob(url, Global::kXLarge);
     }
 
     // 更新fileicon
     if (typeAll.contains(FileInfoAttributeID::kStandardIcon)) {
-        typeAll.removeOne(FileInfoAttributeID::kStandardIcon);
-        d->updateIcon();
+        QWriteLocker wlk(&d->iconLock);
+        d->fileIcon = QIcon();
+        d->fileIconName.clear();
     }
 
     // 更新mediaInfo
@@ -569,7 +591,7 @@ void SyncFileInfo::updateAttributes(const QList<FileInfo::FileInfoAttributeID> &
         DFileInfo::MediaType mediaType { DFileInfo::MediaType::kGeneral };
         QList<DFileInfo::AttributeExtendID> extendIDs;
         {
-            QReadLocker lk(&d->lock);
+            QMutexLocker lk(&d->lock);
             mediaType = d->mediaType;
             extendIDs = d->extendIDs;
         }
@@ -583,23 +605,23 @@ void SyncFileInfo::updateAttributes(const QList<FileInfo::FileInfoAttributeID> &
         QMimeType type;
         QMimeDatabase::MatchMode modeCache { QMimeDatabase::MatchMode::MatchDefault };
         {
-            QReadLocker locker(&d->lock);
+            QMutexLocker locker(&d->lock);
             modeCache = d->mimeTypeMode;
         }
         type = d->mimeTypes(url.path(), modeCache);
-        QWriteLocker locker(&d->lock);
+        QMutexLocker locker(&d->lock);
         d->mimeType = type;
     }
 
     if (typeAll.isEmpty())
         return;
 
-    QWriteLocker locker(&d->lock);
-    d->dfmFileInfo->refresh();
+    d->init(fileUrl());
 }
 
 void SyncFileInfoPrivate::init(const QUrl &url, QSharedPointer<DFMIO::DFileInfo> dfileInfo)
 {
+    QMutexLocker locker(&lock);
     mimeTypeMode = QMimeDatabase::MatchDefault;
     if (url.isEmpty()) {
         qCWarning(logDFMBase, "Failed, can't use empty url init fileinfo");
@@ -623,7 +645,7 @@ void SyncFileInfoPrivate::init(const QUrl &url, QSharedPointer<DFMIO::DFileInfo>
         return;
     }
 
-    dfmFileInfo.reset(new DFileInfo(cvtResultUrl));
+    dfmFileInfo.reset(new DFileInfo(cvtResultUrl, kFileAttributes));
 
     if (!dfmFileInfo) {
         qCWarning(logDFMBase, "Failed, dfm-io use factory create fileinfo");
@@ -642,11 +664,11 @@ QMimeType SyncFileInfoPrivate::mimeTypes(const QString &filePath, QMimeDatabase:
 
 FileInfo::FileType SyncFileInfoPrivate::updateFileType()
 {
-    FileInfo::FileType fileType;
+    FileInfo::FileType fileType = FileInfo::FileType::kUnknown;
     const QUrl &fileUrl = q->fileUrl();
     if (FileUtils::isTrashFile(fileUrl) && q->isAttributes(FileInfo::FileIsType::kIsSymLink)) {
         {
-            QWriteLocker locker(&lock);
+            QMutexLocker locker(&lock);
             this->fileType = FileInfo::FileType::kRegularFile;
         }
         fileType = FileInfo::FileType::kRegularFile;
@@ -655,32 +677,48 @@ FileInfo::FileType SyncFileInfoPrivate::updateFileType()
 
     // Cannot access statBuf.st_mode from the filesystem engine, so we have to stat again.
     // In addition we want to follow symlinks.
-    const QString &absoluteFilePath = filePath();
-    const QByteArray &nativeFilePath = QFile::encodeName(absoluteFilePath);
-    QT_STATBUF statBuffer;
-    if (QT_STAT(nativeFilePath.constData(), &statBuffer) == 0) {
-        if (S_ISDIR(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kDirectory;
-        else if (S_ISCHR(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kCharDevice;
-        else if (S_ISBLK(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kBlockDevice;
-        else if (S_ISFIFO(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kFIFOFile;
-        else if (S_ISSOCK(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kSocketFile;
-        else if (S_ISREG(statBuffer.st_mode))
-            fileType = FileInfo::FileType::kRegularFile;
+    auto fileMode = attribute(DFileInfo::AttributeID::kUnixMode).toUInt();
+    if (fileMode <= 0) {
+        const QString &path = filePath();
+        struct statx stx;
 
-        QWriteLocker locker(&lock);
-        this->fileType = FileInfo::FileType(fileType);
+        if (statx(AT_FDCWD, path.toUtf8().constData(),
+                  AT_SYMLINK_NOFOLLOW,
+                  STATX_TYPE,
+                  &stx)
+            == 0) {
+            fileMode = (stx.stx_mode & S_IFMT);
+        } else {
+            qWarning() << "Failed to get file status for:" << path
+                       << "error:" << strerror(errno);
+        }
     }
+
+    if (S_ISDIR(fileMode))
+        fileType = FileInfo::FileType::kDirectory;
+    else if (S_ISCHR(fileMode))
+        fileType = FileInfo::FileType::kCharDevice;
+    else if (S_ISBLK(fileMode))
+        fileType = FileInfo::FileType::kBlockDevice;
+    else if (S_ISFIFO(fileMode))
+        fileType = FileInfo::FileType::kFIFOFile;
+    else if (S_ISSOCK(fileMode))
+        fileType = FileInfo::FileType::kSocketFile;
+    else if (S_ISREG(fileMode))
+        fileType = FileInfo::FileType::kRegularFile;
+    else
+        fileType = FileInfo::FileType::kUnknown;
+
+    QMutexLocker locker(&lock);
+    this->fileType = FileInfo::FileType(fileType);
+
     return fileType;
 }
 
 QIcon SyncFileInfoPrivate::updateIcon()
 {
-    QIcon icon = LocalFileIconProvider::globalProvider()->icon(q);
+    assert(QThread::currentThread() == qApp->thread());
+    QIcon icon = LocalFileIconProvider::globalProvider()->icon(q->sharedFromThis());
     if (q->isAttributes(OptInfoType::kIsSymLink)) {
         const auto &&target = symLinkTarget();
         if (!target.isEmpty() && target != filePath()) {
@@ -699,14 +737,11 @@ QIcon SyncFileInfoPrivate::updateIcon()
 
 void SyncFileInfoPrivate::updateMediaInfo(const DFileInfo::MediaType type, const QList<DFileInfo::AttributeExtendID> &ids)
 {
-    QReadLocker rlocker(&lock);
+    QMutexLocker locker(&lock);
     if (!ids.isEmpty() && !mediaFuture) {
-        rlocker.unlock();
-        QWriteLocker wlocker(&lock);
-        mediaFuture.reset(new InfoDataFuture(dfmFileInfo->attributeExtend(type, ids, 0)));
+        if (dfmFileInfo)
+            mediaFuture.reset(new InfoDataFuture(dfmFileInfo->attributeExtend(type, ids, 0)));
     } else if (mediaFuture && mediaFuture->isFinished()) {
-        rlocker.unlock();
-        QWriteLocker wlocker(&lock);
         attributesExtend = mediaFuture->mediaInfo();
         mediaFuture.reset(nullptr);
     }
@@ -726,9 +761,24 @@ void SyncFileInfoPrivate::updateMediaInfo(const DFileInfo::MediaType type, const
 QString SyncFileInfoPrivate::fileName() const
 {
     QString fileName = this->attribute(DFileInfo::AttributeID::kStandardName).toString();
-    if (fileName == R"(/)" && FileUtils::isGvfsFile(q->fileUrl()))
+    if (fileName == R"(/)" && ProtocolUtils::isRemoteFile(q->fileUrl()))
         fileName = this->attribute(DFileInfo::AttributeID::kIdFilesystem).toString();
     return fileName;
+}
+/*!
+ * \brief baseName 文件的基本名称
+ *
+ * url = file:///tmp/archive.tar.gz
+ *
+ * baseName = archive
+ *
+ * \param
+ *
+ * \return
+ */
+QString SyncFileInfoPrivate::baseName() const
+{
+    return this->attribute(DFileInfo::AttributeID::kStandardBaseName).toString();
 }
 /*!
  * \brief completeBaseName 文件的完整基本名称
@@ -763,30 +813,44 @@ QString SyncFileInfoPrivate::completeSuffix() const
 
 QString SyncFileInfoPrivate::iconName() const
 {
+    assert(QThread::currentThread() == qApp->thread());
+
+    // 读锁快速路径：命中缓存直接返回，避免在计算期间长时间持写锁阻塞
+    // 并发的 fileIcon() 读取（#15）
+    {
+        QReadLocker rlk(&iconLock);
+        if (!fileIconName.isEmpty())
+            return fileIconName;
+    }
+
+    if (this->attribute(DFileInfo::AttributeID::kStandardIsDir).toBool()) {
+        QWriteLocker wlk(&iconLock);
+        if (!fileIconName.isEmpty())   // double-check
+            return fileIconName;
+        fileIconName = "inode-directory";
+        return fileIconName;
+    }
+
     QString iconNameValue;
     if (SystemPathUtil::instance()->isSystemPath(filePath()))
         iconNameValue = SystemPathUtil::instance()->systemPathIconNameByPath(filePath());
 
-    if (iconNameValue.isEmpty()) {
-        const QStringList &list = this->attribute(DFileInfo::AttributeID::kStandardIcon).toStringList();
-        const auto &iter = std::find_if(list.begin(), list.end(), [](const QString &name) { return QIcon::hasThemeIcon(name); });
-        if (iter != list.end())
-            iconNameValue = *iter;
-    }
+    auto mimetype = q->fileMimeType();
+    if (iconNameValue.isEmpty())
+        iconNameValue = mimetype.iconName();
 
-    if (!FileUtils::isGvfsFile(q->fileUrl()) && iconNameValue.isEmpty())
-        iconNameValue = q->fileMimeType().iconName();
+    iconNameValue = IconUtils::normalizeIconName(iconNameValue);
 
+    // 仅在写入缓存时持写锁
+    QWriteLocker wlk(&iconLock);
+    if (!fileIconName.isEmpty())   // double-check：其它路径可能已填充
+        return fileIconName;
+    fileIconName = iconNameValue;
     return iconNameValue;
 }
 
 QString SyncFileInfoPrivate::mimeTypeName() const
 {
-    // At present, there is no dfmio library code. For temporary repair
-    // local file use the method on v20 to obtain mimeType
-    if (FileUtils::isGvfsFile(q->fileUrl())) {
-        return this->attribute(DFileInfo::AttributeID::kStandardContentType).toString();
-    }
     return q->fileMimeType().name();
 }
 
@@ -805,7 +869,7 @@ QString SyncFileInfoPrivate::fileDisplayName() const
     }
 
     QString fileDisplayName = this->attribute(DFileInfo::AttributeID::kStandardDisplayName).toString();
-    if (fileDisplayName == R"(/)" && FileUtils::isGvfsFile(q->fileUrl()))
+    if (fileDisplayName == R"(/)" && ProtocolUtils::isRemoteFile(q->fileUrl()))
         fileDisplayName = this->attribute(DFileInfo::AttributeID::kIdFilesystem).toString();
 
     return fileDisplayName;
@@ -860,11 +924,7 @@ QString SyncFileInfoPrivate::filePath() const
  */
 QString SyncFileInfoPrivate::symLinkTarget() const
 {
-    QString symLinkTarget;
-
-    if (dfmFileInfo) {
-        symLinkTarget = this->attribute(DFileInfo::AttributeID::kStandardSymlinkTarget).toString();
-    }
+    QString symLinkTarget = this->attribute(DFileInfo::AttributeID::kStandardSymlinkTarget).toString();
     // the link target may be a relative path.
     if (!symLinkTarget.startsWith("/")) {
         auto currPath = path();
@@ -872,6 +932,9 @@ QString SyncFileInfoPrivate::symLinkTarget() const
             currPath += "/";
         symLinkTarget.prepend(currPath);
     }
+
+    if (symLinkTarget.endsWith("/"))
+        symLinkTarget.chop(1);
 
     return symLinkTarget;
 }
@@ -892,15 +955,13 @@ QUrl SyncFileInfoPrivate::redirectedFileUrl() const
  */
 bool SyncFileInfoPrivate::isExecutable() const
 {
-    bool isExecutable = false;
     bool success = false;
-    if (dfmFileInfo) {
-        isExecutable = this->attribute(DFileInfo::AttributeID::kAccessCanExecute, &success).toBool();
-    }
+    bool isExecutable = this->attribute(DFileInfo::AttributeID::kAccessCanExecute, &success).toBool();
+
     if (!success) {
         qCWarning(logDFMBase) << "cannot obtain the property kAccessCanExecute of" << q->fileUrl();
 
-        if (FileUtils::isGvfsFile(q->fileUrl())) {
+        if (ProtocolUtils::isRemoteFile(q->fileUrl())) {
             qCDebug(logDFMBase) << "trying to get isExecutable by judging whether the dir can be iterated" << q->fileUrl();
             struct dirent *next { nullptr };
             DIR *dirp = opendir(filePath().toUtf8().constData());
@@ -917,17 +978,6 @@ bool SyncFileInfoPrivate::isExecutable() const
     }
 
     return isExecutable;
-}
-
-bool SyncFileInfoPrivate::isPrivate() const
-{
-    const QString &path = const_cast<SyncFileInfoPrivate *>(this)->path();
-    const QString &name = fileName();
-
-    static DFMBASE_NAMESPACE::Match match("PrivateFiles");
-
-    QReadLocker locker(&const_cast<SyncFileInfoPrivate *>(this)->lock);
-    return match.match(path, name);
 }
 
 bool SyncFileInfoPrivate::canDelete() const
@@ -961,17 +1011,15 @@ bool SyncFileInfoPrivate::canRename() const
 
     bool canRename = false;
     canRename = SysInfoUtils::isRootUser();
-    if (!canRename)
+    if (!canRename) {
         return this->attribute(DFileInfo::AttributeID::kAccessCanRename).toBool();
+    }
 
     return canRename;
 }
 
 bool SyncFileInfoPrivate::canFetch() const
 {
-    if (isPrivate())
-        return false;
-
     bool isArchive = false;
     if (q->exists())
         isArchive = DFMBASE_NAMESPACE::MimeTypeDisplayManager::instance()->supportArchiveMimetypes().contains(DMimeDatabase().mimeTypeForFile(q->fileUrl()).name());
@@ -995,46 +1043,38 @@ QString SyncFileInfoPrivate::sizeFormat() const
 
 QVariant SyncFileInfoPrivate::attribute(DFileInfo::AttributeID key, bool *ok) const
 {
-    auto tmp = dfmFileInfo;
-    if (tmp) {
-        {
-            QReadLocker locker(&const_cast<SyncFileInfoPrivate *>(this)->lock);
-            if (cacheAttributes.count(key) > 0) {
-                if (ok)
-                    *ok = true;
-                return cacheAttributes.value(key);
-            }
+    // 多线程环境下，`initdfmFileInfo`和`reset`操作可能导致`dfmFileInfo`和`tmp`为null，从而返回错误属性。
+    QMutexLocker locker(&lock);
+    if (dfmFileInfo) {
+        if (cacheAttributes.count(key) > 0) {
+            if (ok)
+                *ok = true;
+            return cacheAttributes.value(key);
         }
 
-        auto value = tmp->attribute(key, ok);
-        return value;
+        return dfmFileInfo->attribute(key, ok);
     }
     return QVariant();
 }
 
 QMap<DFileInfo::AttributeExtendID, QVariant> SyncFileInfoPrivate::mediaInfo(DFileInfo::MediaType type, QList<DFileInfo::AttributeExtendID> ids)
 {
-    if (dfmFileInfo) {
-        {
-            QWriteLocker wlocker(&lock);
-            mediaType = type;
-            extendIDs = ids;
+    {
+        QMutexLocker locker(&lock);
+        mediaType = type;
+        extendIDs = ids;
+        auto it = ids.begin();
+        while (it != ids.end()) {
+            if (attributesExtend.count(*it))
+                it = ids.erase(it);
+            else
+                ++it;
         }
-        {
-            QReadLocker rlocker(&lock);
-            auto it = ids.begin();
-            while (it != ids.end()) {
-                if (attributesExtend.count(*it))
-                    it = ids.erase(it);
-                else
-                    ++it;
-            }
-        }
-        if (!ids.isEmpty())
-            updateMediaInfo(type, ids);
     }
+    if (!ids.isEmpty())
+        updateMediaInfo(type, ids);
 
-    QReadLocker rlocker(&lock);
+    QMutexLocker rlocker(&lock);
     return attributesExtend;
 }
 
@@ -1045,16 +1085,6 @@ SyncFileInfoPrivate::SyncFileInfoPrivate(SyncFileInfo *qq)
 
 SyncFileInfoPrivate::~SyncFileInfoPrivate()
 {
-}
-
-QMimeType SyncFileInfoPrivate::readMimeType(QMimeDatabase::MatchMode mode) const
-{
-    QUrl url = q->urlOf(UrlInfoType::kUrl);
-    if (dfmbase::FileUtils::isLocalFile(url))
-        return mimeDb.mimeTypeForUrl(url);
-    else
-        return mimeDb.mimeTypeForFile(UrlRoute::urlToPath(url),
-                                      mode);
 }
 
 }

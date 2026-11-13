@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -129,22 +129,26 @@ QVariantHash MasteredMediaFileInfo::extraProperties() const
 void MasteredMediaFileInfo::refresh()
 {
     ProxyFileInfo::refresh();
-    if (proxy) {
+
+    QUrl oldBackerUrl = d->backerUrl;
+    d->backupInfo(urlOf(UrlInfoType::kUrl));
+    if (proxy && d->backerUrl == oldBackerUrl) {
         return;
     }
 
-    d->backupInfo(urlOf(UrlInfoType::kUrl));
     setProxy(InfoFactory::create<FileInfo>(d->backerUrl));
 }
 
 void MasteredMediaFileInfo::updateAttributes(const QList<FileInfo::FileInfoAttributeID> &types)
 {
     ProxyFileInfo::updateAttributes(types);
-    if (proxy) {
+
+    QUrl oldBackerUrl = d->backerUrl;
+    d->backupInfo(urlOf(UrlInfoType::kUrl));
+    if (proxy && d->backerUrl == oldBackerUrl) {
         return;
     }
 
-    d->backupInfo(urlOf(UrlInfoType::kUrl));
     setProxy(InfoFactory::create<FileInfo>(d->backerUrl));
 }
 
@@ -157,7 +161,7 @@ bool MasteredMediaFileInfo::canAttributes(const CanableInfoType type) const
 
         return false;
     case FileCanType::kCanRedirectionFileUrl:
-        return proxy;
+        return !proxy.isNull();
     case FileCanType::kCanDrop:
         return d->canDrop();
     case FileCanType::kCanDragCompress:
@@ -171,9 +175,19 @@ bool MasteredMediaFileInfo::canAttributes(const CanableInfoType type) const
 
 Qt::DropActions MasteredMediaFileInfo::supportedOfAttributes(const SupportedType type) const
 {
-    if (type == SupportType::kDrop)
+    if (type == SupportType::kDrop) {
         if (!OpticalHelper::isBurnEnabled())
             return Qt::IgnoreAction;
+
+        if (isAttributes(OptInfoType::kIsWritable)) {
+            return Qt::CopyAction | Qt::MoveAction | Qt::LinkAction;
+        }
+
+        if (d->canDrop()) {
+            return Qt::CopyAction | Qt::MoveAction;
+        }
+        return Qt::IgnoreAction;
+    }
     return ProxyFileInfo::supportedOfAttributes(type);
 }
 

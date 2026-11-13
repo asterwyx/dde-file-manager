@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "backgroundpreview.h"
-#include "desktoputils/ddpugin_eventinterface_helper.h"
+#include "desktoputils/ddplugin_eventinterface_helper.h"
 
 #include <dfm-base/dfm_desktop_defines.h>
 #include <dfm-base/interfaces/screen/abstractscreen.h>
@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QPaintDevice>
+
 #include <qpa/qplatformwindow.h>
 #include <qpa/qplatformscreen.h>
 #include <qpa/qplatformbackingstore.h>
@@ -78,14 +79,16 @@ void BackgroundPreview::updateDisplay()
     auto winMap = rootMap();
     auto *win = winMap.value(screen);
     if (win == nullptr) {
-        fmCritical() << "can not get root " << screen;
+        fmCritical() << "Can not get root window for screen:" << screen;
         return;
     }
 
     QSize trueSize = win->property(DesktopFrameProperty::kPropScreenHandleGeometry).toRect().size();   // 使用屏幕缩放前的分辨率
+    fmDebug() << "Screen" << screen << "true size:" << trueSize;
+
     if (backgroundPixmap.isNull()) {
-        fmCritical() << "screen " << screen << "backfround path" << filePath
-                     << "can not read!";
+        fmCritical() << "Screen" << screen << "background path" << filePath
+                     << "can not read, using white fallback";
         backgroundPixmap = QPixmap(trueSize);
         backgroundPixmap.fill(Qt::white);
     }
@@ -101,8 +104,9 @@ void BackgroundPreview::updateDisplay()
                              trueSize.height()));
     }
 
-    fmDebug() << screen << "background path" << filePath << "truesize" << trueSize << "devicePixelRatio"
-              << this->devicePixelRatioF() << pix << "widget" << this;
+    fmDebug() << "Screen" << screen << "background path" << filePath << "truesize" << trueSize
+              << "devicePixelRatio" << this->devicePixelRatioF() << "final pixmap size:" << pix.size();
+
     pix.setDevicePixelRatio(this->devicePixelRatioF());
 
     pixmap = pix;

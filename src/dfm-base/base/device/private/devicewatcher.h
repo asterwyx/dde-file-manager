@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,8 @@
 #include <dfm-base/dfm_base_global.h>
 
 #include <QObject>
+#include <QSharedPointer>
+#include <QVariantMap>
 
 #include <dfm-mount/base/dmount_global.h>
 
@@ -34,6 +36,9 @@ public:
 
     void startPollingUsage();
     void stopPollingUsage();
+
+    void initUsageCache();
+    void refreshUsage();
 
     void startWatch();
     void stopWatch();

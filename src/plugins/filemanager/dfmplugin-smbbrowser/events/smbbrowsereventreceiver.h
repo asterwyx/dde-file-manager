@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,6 +27,8 @@ public Q_SLOTS:
     bool hookSetTabName(const QUrl &url, QString *tabName);
 
     bool hookTitleBarAddrHandle(QUrl *url);
+    bool hookAllowRepeatUrl(const QUrl &cur, const QUrl &pre);
+    bool hookCopyFilePath(quint64, const QList<QUrl> &urlList, const QUrl &rootUrl);
 
 private:
     bool getOriginalUri(const QUrl &in, QUrl *out);

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,6 +11,7 @@
 #include "plugins/common/dfmplugin-utils/reportlog/datas/vaultreportdata.h"
 
 #include <dfm-base/base/application/settings.h>
+#include <dfm-base/utils/iconutils.h>
 
 #include <dfm-framework/event/event.h>
 
@@ -30,13 +31,12 @@ using namespace dfmplugin_vault;
 using namespace dfmplugin_utils;
 
 VaultRemoveProgressView::VaultRemoveProgressView(QWidget *parent)
-    : QWidget(parent)
-    , layout(new QVBoxLayout())
+    : QWidget(parent), layout(new QVBoxLayout())
 {
     deletingWidget = new QWidget(this);
     QVBoxLayout *deletingLay = new QVBoxLayout;
     vaultRmProgressBar = new DWaterProgress(deletingWidget);
-    vaultRmProgressBar->setFixedSize(80, 80);
+    vaultRmProgressBar->setFixedSize(90, 90);
     hintLabel = new DLabel(tr("Removing..."), deletingWidget);
     deletingLay->addWidget(vaultRmProgressBar, 0, Qt::AlignHCenter);
     deletingLay->addWidget(hintLabel, 0, Qt::AlignHCenter);
@@ -45,7 +45,7 @@ VaultRemoveProgressView::VaultRemoveProgressView(QWidget *parent)
     deletedWidget = new QWidget(this);
     QVBoxLayout *deletedLay = new QVBoxLayout;
     deleteFinishedImageLabel = new DLabel(deletedWidget);
-    deleteFinishedImageLabel->setPixmap(QIcon::fromTheme("dialog-ok").pixmap(100, 100));
+    deleteFinishedImageLabel->setPixmap(IconUtils::hiDpiPixmap(QIcon::fromTheme("dialog-ok"), QSize(100, 100), this));
     deleteFinishedImageLabel->setAlignment(Qt::AlignHCenter);
     finishedLabel = new DLabel(tr("Deleted successfully"), deletedWidget);
     deletedLay->addWidget(deleteFinishedImageLabel, 0, Qt::AlignHCenter);
@@ -53,8 +53,7 @@ VaultRemoveProgressView::VaultRemoveProgressView(QWidget *parent)
     deletedWidget->setLayout(deletedLay);
     deletedWidget->setHidden(true);
 
-
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(deletingWidget, 0, Qt::AlignCenter);
     this->setLayout(layout);
 

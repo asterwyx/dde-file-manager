@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,6 +22,7 @@ inline constexpr char kRSAPUBKeyFileName[] { "rsapubkey" };
 inline constexpr char kRSACiphertextFileName[] { "rsaclipher" };
 inline constexpr char kPasswordHintFileName[] { "passwordHint" };
 inline constexpr char kVaultConfigFileName[] { "vaultConfig.ini" };
+inline constexpr char kVaultPswContainerFileName[] { "password_container.bin" };
 
 //propertydailog and detaillview property change
 inline constexpr char kFieldReplace[] { "kFieldReplace" };
@@ -78,9 +79,10 @@ inline constexpr int kUserKeyInterceptIndex { 50 };   //! 用户密钥从公钥�
 
 inline constexpr char kRootProxy[] { "pkexec deepin-vault-authenticateProxy" };
 
+// NOTE: Not DBus! This is polkit policy (from com.deepin.filemanager.vault.policy)
 inline constexpr char kPolkitVaultCreate[] { "com.deepin.filemanager.daemon.VaultManager.Create" };
 inline constexpr char kPolkitVaultRemove[] { "com.deepin.filemanager.daemon.VaultManager.Remove" };
-
+inline constexpr char kPolkitVaultRetrieve[] { "com.deepin.filemanager.vault.VerifyKey.RetrievePassword" };
 inline constexpr int kBuffterMaxLine { 1024 };   //! shell命令输出每行最大的字符个数
 
 inline const QString kVaultBasePath(QDir::homePath() + QString("/.config/Vault"));   //!! 获取保险箱创建的目录地址

@@ -1,0 +1,405 @@
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "editstackedwidget.h"
+
+#include <dfm-base/base/schemefactory.h>
+#include <dfm-base/base/device/deviceutils.h>
+#include <dfm-base/file/local/syncfileinfo.h>
+#include <dfm-base/dfm_event_defines.h>
+#include <dfm-base/interfaces/abstractjobhandler.h>
+#include <dfm-base/utils/elidetextlayout.h>
+#include <dfm-base/utils/universalutils.h>
+#include <dfm-base/utils/fileutils.h>
+#include <dfm-base/widgets/dfmcustombuttons/customiconbutton.h>
+
+#include <dfm-framework/dpf.h>
+
+#include <QKeyEvent>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QPainter>
+#include <QFileInfo>
+#include <QLabel>
+#include <DStyle>
+
+Q_DECLARE_METATYPE(QList<QUrl> *)
+
+DWIDGET_USE_NAMESPACE
+DFMBASE_USE_NAMESPACE
+using namespace dfmplugin_propertydialog;
+
+static constexpr int kExtendedWidgetWidth { 360 };
+static constexpr int kTextPadding { 4 };
+static constexpr int kTextShowWidth { 340 };
+
+NameTextEdit::NameTextEdit(const QString &text, QWidget *parent)
+    : DTextEdit(text, parent)
+{
+    setObjectName("NameTextEdit");
+    setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setFrameShape(QFrame::NoFrame);
+    setFixedWidth(kExtendedWidgetWidth);
+    setContextMenuPolicy(Qt::NoContextMenu);
+
+    installEventFilter(this);
+    adjustStyle();
+
+    connect(this, &QTextEdit::textChanged, this, &NameTextEdit::slotTextChanged);
+}
+
+NameTextEdit::~NameTextEdit()
+{
+    if (tooltip) {
+        tooltip->hide();
+        tooltip->deleteLater();
+        tooltip = nullptr;
+    }
+}
+
+bool NameTextEdit::isCanceled() const
+{
+    return isCancel;
+}
+
+void NameTextEdit::setIsCanceled(bool isCanceled)
+{
+    isCancel = isCanceled;
+}
+
+void NameTextEdit::slotTextChanged()
+{
+    QSignalBlocker blocker(this);
+    Q_UNUSED(blocker)
+
+    // Step 1: Strip characters that are always illegal in filenames
+    QString text = toPlainText();
+    const int origLen = text.length();
+    text.remove(QChar(0));
+
+    // Adjust cursor for the characters just removed
+    int endPos = textCursor().position() - (origLen - text.length());
+
+    // Step 2: Strip config-defined illegal characters (e.g. \:*"?<>|)
+    const QString dstText = FileUtils::preprocessingFileName(text);
+    const bool hasInvalidChar = (text != dstText);
+    endPos += dstText.length() - text.length();
+    text = dstText;
+
+    // Step 3: Enforce NAME_MAX, protecting the suffix from being truncated.
+    //   Split text into base + dotSuffix, apply processLength only to base,
+    //   then reattach dotSuffix.
+    const QString dotSuffix = (!fileSuffix.isEmpty() && text.endsWith("." + fileSuffix))
+            ? ("." + fileSuffix)
+            : QString();
+    if (!dotSuffix.isEmpty()) {
+        QString base = text.left(text.length() - dotSuffix.length());
+        int basePos = qMin(endPos, static_cast<int>(base.length()));
+        FileUtils::processLength(base, basePos, NAME_MAX - textLength(dotSuffix),
+                                 useCharCount, base, basePos);
+        text = base + dotSuffix;
+        endPos = basePos;
+    } else {
+        FileUtils::processLength(text, endPos, NAME_MAX, useCharCount, text, endPos);
+    }
+
+    // Step 4: Apply changes to the editor
+    if (text != toPlainText()) {
+        QTextEdit::setPlainText(text);
+    }
+
+    QTextCursor cursor = textCursor();
+    cursor.setPosition(endPos);
+    setTextCursor(cursor);
+
+    if (isReadOnly())
+        setFixedHeight(static_cast<int>(document()->size().height()));
+
+    if (hasInvalidChar)
+        showAlertMessage(tr("%1 are not allowed").arg("|/\\*:\"'?<>"));
+}
+
+void NameTextEdit::showAlertMessage(const QString &text, int duration)
+{
+    if (!tooltip) {
+        tooltip = createTooltip();
+        tooltip->setBackgroundColor(palette().color(backgroundRole()));
+        QTimer::singleShot(duration, this, [=] {
+            if (tooltip) {
+                tooltip->hide();
+                tooltip->deleteLater();
+                tooltip = nullptr;
+            }
+        });
+    }
+
+    if (QLabel *label = qobject_cast<QLabel *>(tooltip->getContent())) {
+        label->setText(text);
+        label->adjustSize();
+    }
+
+    if (!this->window())
+        return;
+
+    tooltip->setParent(this->window());
+    QPoint pos = this->mapTo(this->window(), QPoint(this->width() / 2, this->height()));
+    tooltip->show(pos.x(), pos.y());
+}
+
+void NameTextEdit::focusOutEvent(QFocusEvent *event)
+{
+    QTextEdit::focusOutEvent(event);
+}
+
+bool NameTextEdit::eventFilter(QObject *obj, QEvent *e)
+{
+    if (e->type() == QEvent::Paint && obj == this) {
+        const int oldFrameRadius = DStyle::pixelMetric(style(), DStyle::PM_FrameRadius, nullptr, this);
+        const int frameRadius = DStyle::pixelMetric(style(), DStyle::PM_FrameRadius);
+
+        DStyle::setFrameRadius(this, frameRadius);
+
+        QPainter p(this);
+        p.setRenderHints(QPainter::Antialiasing);
+
+        QStyleOptionFrame panel;
+        initStyleOption(&panel);
+        style()->drawPrimitive(QStyle::PE_PanelLineEdit, &panel, &p, this);
+
+        DStyle::setFrameRadius(this, oldFrameRadius);
+        return true;
+    }
+
+    return DTextEdit::eventFilter(obj, e);
+}
+
+void NameTextEdit::adjustStyle()
+{
+    document()->setDocumentMargin(kTextPadding);
+    QTextOption opt = document()->defaultTextOption();
+    opt.setAlignment(Qt::AlignLeft);
+    document()->setDefaultTextOption(opt);
+    DTK_WIDGET_NAMESPACE::DStyle::setFrameRadius(this, 0);
+}
+
+void NameTextEdit::keyPressEvent(QKeyEvent *event)
+{
+    QEvent::Type ty = event->type();
+    Q_UNUSED(ty)
+    Qt::KeyboardModifiers modifiers = event->modifiers();
+    Q_UNUSED(modifiers)
+    if (event->key() == Qt::Key_Escape) {
+        setIsCanceled(true);
+        clearFocus();
+        emit editFinished();
+        return;
+    }
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        setIsCanceled(false);
+        clearFocus();
+        emit editFinished();
+        return;
+    }
+    QTextEdit::keyPressEvent(event);
+}
+
+DArrowRectangle *NameTextEdit::createTooltip()
+{
+    auto tooltip = new DArrowRectangle(DArrowRectangle::ArrowTop);
+    tooltip->setObjectName("AlertTooltip");
+
+    QLabel *label = new QLabel(tooltip);
+
+    label->setWordWrap(true);
+    label->setMaximumWidth(500);
+    tooltip->setContent(label);
+    tooltip->setArrowX(15);
+    tooltip->setArrowHeight(5);
+    return tooltip;
+}
+
+EditStackedWidget::EditStackedWidget(QWidget *parent)
+    : QStackedWidget(parent), textShowFrame(nullptr)
+{
+    initUI();
+}
+
+EditStackedWidget::~EditStackedWidget()
+{
+}
+
+void EditStackedWidget::initUI()
+{
+    QFrame *editFrame = new QFrame;
+    fileNameEdit = new NameTextEdit(QString(""), editFrame);
+    QHBoxLayout *editLayout = new QHBoxLayout;
+    editLayout->addStretch();
+    editLayout->addWidget(fileNameEdit);
+    editLayout->addStretch();
+    editLayout->setSpacing(0);
+    editLayout->setContentsMargins(0, 0, 0, 0);
+    editFrame->setLayout(editLayout);
+
+    this->addWidget(editFrame);
+
+    connect(fileNameEdit, &NameTextEdit::editFinished, this, &EditStackedWidget::showTextShowFrame);
+}
+
+void EditStackedWidget::initTextShowFrame(QString fileName)
+{
+    auto originalFileName = fileName;   // 存储原始文件名
+    QRect rect(QPoint(0, 0), QSize(kTextShowWidth, 66));
+    QStringList labelTexts;
+    ElideTextLayout layout(fileName);
+    layout.layout(rect, Qt::ElideMiddle, nullptr, Qt::NoBrush, &labelTexts);
+
+    int textHeight = 0;
+
+    if (textShowFrame) {
+        delete textShowFrame;
+        textShowFrame = new QFrame(this);
+    } else {
+        textShowFrame = new QFrame(this);
+    }
+    textShowFrame->setFixedWidth(kExtendedWidgetWidth);
+
+    nameEditIcon = new CustomDIconButton(textShowFrame);
+    nameEditIcon->setAccessibleName("NameEditIcon");
+    nameEditIcon->setObjectName(QString("EditButton"));
+    nameEditIcon->setIcon(QIcon::fromTheme("dfm_rename"));
+    nameEditIcon->setIconSize({ 12, 12 });
+    nameEditIcon->setFixedSize(30, 30);
+    nameEditIcon->setFocusPolicy(Qt::NoFocus);
+
+    connect(nameEditIcon, &QPushButton::clicked, this, &EditStackedWidget::renameFile);
+
+    QVBoxLayout *textShowLayout = new QVBoxLayout;
+    for (const auto &labelText : labelTexts) {
+        DLabel *fileNameLabel = new DLabel(labelText, textShowFrame);
+        fileNameLabel->setTextFormat(Qt::PlainText);
+        fileNameLabel->setAlignment(Qt::AlignHCenter);
+        fileNameLabel->setContentsMargins(0, 0, 0, 0);
+        fileNameLabel->setMargin(0);
+        textHeight += fileNameLabel->fontInfo().pixelSize() + 10;
+
+        QHBoxLayout *hLayout = new QHBoxLayout;
+        hLayout->addStretch(1);
+        hLayout->addWidget(fileNameLabel, 0, Qt::AlignVCenter);
+
+        if (labelText == labelTexts.last()) {
+            fileNameLabel->setStyleSheet("padding-right: 6px;");
+            QVBoxLayout *btnWrap = new QVBoxLayout;
+            btnWrap->setContentsMargins(0, -7, 0, 0);
+            btnWrap->setSpacing(0);
+            btnWrap->addWidget(nameEditIcon);
+            hLayout->addLayout(btnWrap);
+        } else if (fileNameLabel->fontMetrics().horizontalAdvance(labelText) > (rect.width() - 10)) {
+            fileNameLabel->setFixedWidth(rect.width());
+        }
+
+        textShowLayout->addLayout(hLayout);
+        hLayout->addStretch(1);
+    }
+
+    textShowLayout->setContentsMargins(0, 0, 0, 0);
+    textShowLayout->setSpacing(0);
+    textShowFrame->setLayout(textShowLayout);
+    textShowLayout->addStretch(1);
+
+    textShowFrame->setFixedHeight(textHeight + 15);
+
+    if (this->count() == 1) {
+        this->addWidget(textShowFrame);
+    } else {
+        this->insertWidget(1, textShowFrame);
+    }
+    this->setCurrentIndex(1);
+    this->setFixedHeight(textShowFrame->height());
+
+    // 对于多行显示的情况，给整个frame添加tooltip
+    if (labelTexts.join("") != originalFileName) {
+        textShowFrame->setToolTip(originalFileName);
+        textShowFrame->setCursor(Qt::PointingHandCursor);
+    }
+}
+
+void EditStackedWidget::renameFile()
+{
+    QFileInfo info(fileUrl.path());
+
+    if (FileUtils::supportLongName(fileUrl))
+        fileNameEdit->setCharCountLimit();
+
+    // Store the suffix so that slotTextChanged() can protect it from truncation
+    fileNameEdit->setSuffix(info.suffix());
+    fileNameEdit->setPlainText(info.fileName());
+    this->setCurrentIndex(0);
+    fileNameEdit->setFixedHeight(textShowFrame->height());
+    fileNameEdit->setFocus();
+
+    // Select only the base name (everything before the last extension),
+    // leaving the suffix unselected so the user doesn't accidentally overwrite it.
+    const QString baseName = info.completeBaseName();
+    QTextCursor cursor = fileNameEdit->textCursor();
+    cursor.setPosition(0);
+    cursor.setPosition(baseName.length(), QTextCursor::KeepAnchor);
+    fileNameEdit->setTextCursor(cursor);
+}
+
+void EditStackedWidget::showTextShowFrame()
+{
+    QString newName = fileNameEdit->toPlainText();
+
+    if (newName.trimmed().isEmpty()) {
+        fileNameEdit->setIsCanceled(true);
+    }
+
+    if (fileNameEdit->isCanceled())
+        initTextShowFrame(newName);
+    else {
+        QUrl oldUrl = fileUrl;
+        QList<QUrl> urls {};
+        bool ok = UniversalUtils::urlsTransformToLocal(QList<QUrl>() << oldUrl, &urls);
+        if (ok && !urls.isEmpty())
+            oldUrl = urls.first();
+
+        QUrl newUrl = QUrl::fromLocalFile(QFileInfo(oldUrl.path()).absolutePath() + "/" + newName);
+
+        if (oldUrl == newUrl) {
+            this->setCurrentIndex(1);
+            return;
+        }
+
+        initTextShowFrame(newName);
+        dpfSignalDispatcher->publish(GlobalEventType::kRenameFile, this->topLevelWidget()->winId(), oldUrl, newUrl, DFMBASE_NAMESPACE::AbstractJobHandler::JobFlag::kNoHint);
+        fileUrl = newUrl;
+        emit selectUrlRenamed(newUrl);
+    }
+}
+
+void EditStackedWidget::selectFile(const QUrl &url)
+{
+    fileUrl = url;
+    FileInfoPointer info = InfoFactory::create<FileInfo>(url, Global::CreateFileInfoType::kCreateFileInfoSync);
+    if (!info.isNull()) {
+        initTextShowFrame(info->displayOf(DisPlayInfoType::kFileDisplayName));
+        if (!info->canAttributes(CanableInfoType::kCanRename)) {
+            nameEditIcon->hide();
+        } else {
+            nameEditIcon->show();
+        }
+    }
+}
+
+void EditStackedWidget::mouseProcess(QMouseEvent *event)
+{
+    if (fileNameEdit->isVisible()) {
+        if (event->button() != Qt::RightButton) {
+            fileNameEdit->setIsCanceled(fileNameEdit->toPlainText().isEmpty());
+            emit fileNameEdit->editFinished();
+        }
+    }
+}

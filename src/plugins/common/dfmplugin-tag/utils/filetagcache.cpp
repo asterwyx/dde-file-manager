@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -67,6 +67,11 @@ void FileTagCacheWorker::onFilesUntagged(const QVariantMap &fileAndTags)
     emit FileTagCacheIns.filesUntagged(fileAndTags);
 }
 
+void FileTagCacheWorker::onTrashFileTagsChanged()
+{
+    FileTagCache::instance().reloadTrashFileTagsCache();
+}
+
 FileTagCachePrivate::FileTagCachePrivate(FileTagCache *qq)
     : q(qq)
 {
@@ -98,6 +103,9 @@ void FileTagCache::loadFileTagsFromDatabase()
     auto it = tagsColor.begin();
     for (; it != tagsColor.end(); ++it)
         d->tagProperty.insert(it.key(), QColor(it.value().toString()));
+
+    // 加载回收站标记数据
+    d->trashFileTagsCache = TagProxyHandle::instance()->getAllTrashFileTags();
 }
 
 void FileTagCache::addTags(const QVariantMap &tags)
@@ -186,6 +194,19 @@ void FileTagCache::taggeFiles(const QVariantMap &fileAndTags)
     }
 }
 
+QStringList FileTagCache::getTrashTags(const QString &path, qint64 inode) const
+{
+    QReadLocker locker(&d->lock);
+    QString key = QString("%1:%2").arg(path).arg(inode);
+    return d->trashFileTagsCache.value(key).toStringList();
+}
+
+void FileTagCache::reloadTrashFileTagsCache()
+{
+    QWriteLocker locker(&d->lock);
+    d->trashFileTagsCache = TagProxyHandle::instance()->getAllTrashFileTags();
+}
+
 void FileTagCache::untaggeFiles(const QVariantMap &fileAndTags)
 {
     auto it = fileAndTags.begin();
@@ -225,11 +246,34 @@ QStringList FileTagCache::getTagsByFiles(const QStringList &paths) const
 
     for (const QString &path : paths) {
         QStringList tags = d->fileTagsCache.value(path).toStringList();
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
         intersectionTags = intersectionTags.toSet().intersect(tags.toSet()).values();
+#else
+        auto intersectionSet = QSet<QString> { intersectionTags.begin(), intersectionTags.end() };
+        auto tagsSet = QSet<QString> { tags.begin(), tags.end() };
+        intersectionTags = intersectionSet.intersect(tagsSet).values();
+#endif
         if (intersectionTags.isEmpty())
             break;
     }
     return intersectionTags;
+}
+
+QHash<QString, QStringList> FileTagCache::findChildren(const QString &parentPath) const
+{
+    QHash<QString, QStringList> children;
+    QString normalizedParent = parentPath;
+    if (!normalizedParent.endsWith('/'))
+        normalizedParent += '/';
+
+    QReadLocker wlk(&d->lock);
+    for (auto it = d->fileTagsCache.cbegin(); it != d->fileTagsCache.cend(); ++it) {
+        const QString &filePath = it.key();
+        if (filePath.startsWith(normalizedParent))
+            children.insert(filePath, it.value().toStringList());
+    }
+
+    return children;
 }
 
 FileTagCache::TagColorMap FileTagCache::getTagsColor(const QStringList &tags) const
@@ -268,6 +312,16 @@ QMap<QString, QColor> FileTagCacheController::getCacheTagsColor(const QStringLis
     return FileTagCache::instance().getTagsColor(tags);
 }
 
+QHash<QString, QStringList> FileTagCacheController::findChildren(const QString &parentPath) const
+{
+    return FileTagCache::instance().findChildren(parentPath);
+}
+
+QStringList FileTagCacheController::getTrashFileTags(const QString &path, qint64 inode)
+{
+    return FileTagCache::instance().getTrashTags(path, inode);
+}
+
 FileTagCacheController::~FileTagCacheController()
 {
     updateThread->quit();
@@ -289,6 +343,7 @@ void FileTagCacheController::init()
     connect(TagProxyHandleIns, &TagProxyHandle::tagsNameChanged, cacheWorker.data(), &FileTagCacheWorker::onTagsNameChanged);
     connect(TagProxyHandleIns, &TagProxyHandle::filesTagged, cacheWorker.data(), &FileTagCacheWorker::onFilesTagged);
     connect(TagProxyHandleIns, &TagProxyHandle::filesUntagged, cacheWorker.data(), &FileTagCacheWorker::onFilesUntagged);
+    connect(TagProxyHandleIns, &TagProxyHandle::trashFileTagsChanged, cacheWorker.data(), &FileTagCacheWorker::onTrashFileTagsChanged);
 
     cacheWorker->moveToThread(updateThread.data());
     updateThread->start();

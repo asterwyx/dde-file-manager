@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -24,6 +24,8 @@ private:
     void createAction(QMenu *menu, const QString &actName, bool isSubAct = false, bool checkable = false);
     void updateMenu(QMenu *menu);
     void updateSortMenu(QMenu *menu);
+    void updateGroupSubMenu(QMenu *menu);
+    void groupByRole(const QString &strategy);
     bool openFileLocation(const QString &path);
     void disableSubScene(DFMBASE_NAMESPACE::AbstractMenuScene *scene, const QString &sceneName);
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -18,7 +18,6 @@
 #include <QHBoxLayout>
 
 #include <QApplication>
-#include <QDesktopWidget>
 #include <QWindow>
 #include <QDebug>
 #include <QScrollArea>
@@ -33,6 +32,7 @@
 #include <DPushButton>
 #include <DSuggestButton>
 #include <DLabel>
+#include <DToolTip>
 #include <DCheckBox>
 #include <DCommandLinkButton>
 #include <DHorizontalLine>
@@ -48,17 +48,22 @@ DFMBASE_USE_NAMESPACE
 DFMGLOBAL_USE_NAMESPACE
 using namespace dfmplugin_utils;
 
-OpenWithDialogListItem::OpenWithDialogListItem(const QIcon &icon, const QString &text, QWidget *parent)
+OpenWithDialogListItem::OpenWithDialogListItem(const QString &iconName, const QString &text, QWidget *parent)
     : QWidget(parent),
-      icon(icon.isNull() ? QIcon::fromTheme("application-x-desktop") : icon),
+      iconName(iconName.isEmpty() ? "application-x-desktop" : iconName),
       checkButton(new DIconButton(this)),
       iconLabel(new DLabel(this)),
       label(new DLabel(this))
 
 {
+    checkButton->setObjectName("CheckButton");
+    checkButton->setAccessibleName("CheckButton");
     checkButton->setFixedSize(15, 15);
     checkButton->setFlat(true);
     label->setText(text);
+    label->setElideMode(Qt::ElideMiddle);
+    label->setToolTip(text);
+    DToolTip::setToolTipShowMode(label, DToolTip::ShowWhenElided);
     iconLabel->setAlignment(Qt::AlignCenter);
 
     QHBoxLayout *layout = new QHBoxLayout(this);
@@ -88,15 +93,35 @@ void OpenWithDialogListItem::initUiForSizeMode()
 {
 #ifdef DTKWIDGET_CLASS_DSizeMode
     int size = DSizeModeHelper::element(25, 30);
-    iconLabel->setFixedSize(size, size);
-    iconLabel->setPixmap(icon.pixmap(iconLabel->size()));
-    setFixedSize(220, DSizeModeHelper::element(40, 50));
+    setFixedSize(224, DSizeModeHelper::element(40, 50));
 #else
     int size = 30;
-    iconLabel->setFixedSize(size, size);
     iconLabel->setPixmap(icon.pixmap(iconLabel->size()));
-    setFixedSize(220, 50);
+    setFixedSize(224, 50);
 #endif
+    iconLabel->setFixedSize(size, size);
+    updateLabelIcon(size);
+}
+
+void OpenWithDialogListItem::updateLabelIcon(int size)
+{
+    const QStringList iconCandidates = { iconName, "application-x-desktop" };
+    const QSize iconSize(size, size);
+    const qreal dpr = qApp->devicePixelRatio();
+    const bool isLightTheme = (DGuiApplicationHelper::instance()->themeType() == DGuiApplicationHelper::LightType);
+
+    for (const QString &candidate : iconCandidates) {
+        DDciIcon dciIcon = DDciIcon::fromTheme(candidate);
+        if (!dciIcon.isNull()) {
+            iconLabel->setPixmap(dciIcon.pixmap(dpr, size, isLightTheme ? DDciIcon::Light : DDciIcon::Dark));
+            return;
+        }
+        QIcon icon = QIcon::fromTheme(candidate);
+        if (!icon.isNull()) {
+            iconLabel->setPixmap(icon.pixmap(iconSize, dpr));
+            return;
+        }
+    }
 }
 
 QString OpenWithDialogListItem::text() const
@@ -104,7 +129,11 @@ QString OpenWithDialogListItem::text() const
     return label->text();
 }
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 void OpenWithDialogListItem::enterEvent(QEvent *e)
+#else
+void OpenWithDialogListItem::enterEvent(QEnterEvent *e)
+#endif
 {
     Q_UNUSED(e)
 
@@ -134,13 +163,16 @@ void OpenWithDialogListItem::paintEvent(QPaintEvent *e)
 
     path.addRoundedRect(rect(), 6, 6);
     pa.setRenderHint(QPainter::Antialiasing);
-    pa.fillPath(path, QColor(0, 0, 0, static_cast<int>(0.05 * 255)));
+    bool isLightTheme = (DGuiApplicationHelper::instance()->themeType() == DGuiApplicationHelper::LightType);
+    int alpha = static_cast<int>(0.05 * 255);
+    QColor hoverColor = isLightTheme ? QColor(0, 0, 0, alpha) : QColor(255, 255, 255, alpha);
+    pa.fillPath(path, hoverColor);
 }
 
 class OpenWithDialogListSparerItem : public QWidget
 {
 public:
-    explicit OpenWithDialogListSparerItem(const QString &title, QWidget *parent = nullptr);
+    explicit OpenWithDialogListSparerItem(const QString &title, QWidget *parent = nullptr, bool showSeparator = true);
 
 private slots:
     void initUiForSizeMode();
@@ -164,17 +196,21 @@ void OpenWithDialogListSparerItem::initUiForSizeMode()
 #endif
 }
 
-OpenWithDialogListSparerItem::OpenWithDialogListSparerItem(const QString &title, QWidget *parent)
-    : QWidget(parent), separator(new DHorizontalLine(this)), titleLabel(new QLabel(title, this))
+OpenWithDialogListSparerItem::OpenWithDialogListSparerItem(const QString &title, QWidget *parent, bool showSeparator)
+    : QWidget(parent), titleLabel(new QLabel(title, this))
 {
 #ifdef DTKWIDGET_CLASS_DSizeMode
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::sizeModeChanged, this, &OpenWithDialogListSparerItem::initUiForSizeMode);
 #endif
     QVBoxLayout *layout = new QVBoxLayout(this);
     initUiForSizeMode();
-    layout->addWidget(separator);
+    if (showSeparator) {
+        separator = new DHorizontalLine(this);
+        layout->addWidget(separator);
+    }
     layout->addWidget(titleLabel);
-    layout->setContentsMargins(20, 0, 20, 0);
+    layout->setContentsMargins(0, 0, 0, 0);
+    titleLabel->setContentsMargins(20, 0, 0, 0);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
@@ -258,20 +294,32 @@ void OpenWithDialog::initUI()
     scrollArea->setWidget(contentWidget);
 
     recommandLayout = new DFlowLayout;
+    recommandLayout->setHorizontalSpacing(10);
+    recommandLayout->setContentsMargins(0, 0, 0, 0);
     otherLayout = new DFlowLayout;
+    otherLayout->setHorizontalSpacing(10);
+    otherLayout->setContentsMargins(0, 0, 0, 0);
 
     openFileChooseButton = new DCommandLinkButton(tr("Add other programs"), this);
+    openFileChooseButton->setObjectName("OpenFileChooseButton");
+    openFileChooseButton->setAccessibleName("OpenFileChooseButton");
     setToDefaultCheckBox = new DCheckBox(tr("Set as default"), this);
+    setToDefaultCheckBox->setObjectName("SetToDefaultCheckBox");
+    setToDefaultCheckBox->setAccessibleName("SetToDefaultCheckBox");
     setToDefaultCheckBox->setChecked(true);
     cancelButton = new DPushButton(tr("Cancel", "button"));
+    cancelButton->setObjectName("CancelButton");
+    cancelButton->setAccessibleName("CancelButton");
     chooseButton = new DSuggestButton(tr("Confirm", "button"));
-    cancelButton->setFixedWidth(78);
-    chooseButton->setFixedWidth(78);
+    chooseButton->setObjectName("ChooseButton");
+    chooseButton->setAccessibleName("ChooseButton");
+    cancelButton->setMinimumWidth(78);
+    chooseButton->setMinimumWidth(78);
     chooseButton->setFocus();
 
     QVBoxLayout *contentLayout = new QVBoxLayout;
     contentLayout->setContentsMargins(10, 0, 10, 0);
-    contentLayout->addWidget(new OpenWithDialogListSparerItem(tr("Recommended Applications"), this));
+    contentLayout->addWidget(new OpenWithDialogListSparerItem(tr("Recommended Applications"), this, false));
     contentLayout->addLayout(recommandLayout);
     contentLayout->addWidget(new OpenWithDialogListSparerItem(tr("Other Applications"), this));
     contentLayout->addLayout(otherLayout);
@@ -285,7 +333,7 @@ void OpenWithDialog::initUI()
     buttonLayout->addWidget(setToDefaultCheckBox);
     buttonLayout->addSpacing(20);
     buttonLayout->addWidget(cancelButton);
-    buttonLayout->addSpacing(5);
+    buttonLayout->addSpacing(10);
     buttonLayout->addWidget(chooseButton);
     buttonLayout->setContentsMargins(10, 0, 10, 0);
 
@@ -293,7 +341,7 @@ void OpenWithDialog::initUI()
     QVBoxLayout *bottomLayout = new QVBoxLayout;
 
     bottomLayout->addWidget(new DHorizontalLine(this));
-    bottomLayout->addSpacing(5);
+    bottomLayout->addSpacing(10);
     bottomLayout->addLayout(buttonLayout);
     bottomLayout->setContentsMargins(10, 0, 10, 0);
 
@@ -303,6 +351,13 @@ void OpenWithDialog::initUI()
     mainLayout->addSpacing(15);
 #endif
     mainLayout->setSpacing(0);
+
+    // 固定分割线：位于大标题下方，不随内容滚动而消失
+    QHBoxLayout *titleSeparatorLayout = new QHBoxLayout;
+    titleSeparatorLayout->setContentsMargins(10, 0, 10, 0);
+    titleSeparatorLayout->addWidget(new DHorizontalLine(this));
+    mainLayout->addLayout(titleSeparatorLayout);
+
     mainLayout->addWidget(scrollArea);
     mainLayout->addLayout(bottomLayout);
     mainLayout->setContentsMargins(0, 35, 0, 10);
@@ -361,12 +416,14 @@ void OpenWithDialog::initData()
     }
 
     const QString &defaultApp = MimesAppsManager::instance()->getDefaultAppByMimeType(mimeType);
-    const QStringList &recommendApps = MimesAppsManager::instance()->getRecommendedAppsByQio(mimeType);
+    const QStringList &recommendApps = curUrl.isValid() || !urlList.isEmpty() ?
+                MimesAppsManager::instance()->getRecommendedApps(curUrl.isValid() ? curUrl : urlList.first())
+                                                                              : MimesAppsManager::instance()->getRecommendedAppsByQio(mimeType);
 
     for (int i = 0; i < recommendApps.count(); ++i) {
         const DesktopFile &desktopInfo = MimesAppsManager::instance()->DesktopObjs.value(recommendApps.at(i));
 
-        OpenWithDialogListItem *item = createItem(QIcon::fromTheme(desktopInfo.desktopIcon()), desktopInfo.desktopDisplayName(), recommendApps.at(i));
+        OpenWithDialogListItem *item = createItem(desktopInfo.desktopIcon(), desktopInfo.desktopDisplayName(), recommendApps.at(i));
         recommandLayout->addWidget(item);
 
         if (!defaultApp.isEmpty() && recommendApps.at(i).endsWith(defaultApp))
@@ -406,7 +463,7 @@ void OpenWithDialog::initData()
 
         otherAppList << MimesAppsManager::instance()->DesktopObjs.value(f);
         QString iconName = otherAppList.last().desktopIcon();
-        OpenWithDialogListItem *item = createItem(QIcon::fromTheme(iconName), otherAppList.last().desktopDisplayName(), f);
+        OpenWithDialogListItem *item = createItem(iconName, otherAppList.last().desktopDisplayName(), f);
         otherLayout->addWidget(item);
 
         if (!defaultApp.isEmpty() && f.endsWith(defaultApp))
@@ -437,6 +494,7 @@ void OpenWithDialog::useOtherApplication()
 
     targetDesktopFileName = targetDesktopFileName.arg(QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation)).arg(qApp->applicationName()).arg(mimeType.name().replace("/", "-"));
 
+    QString iconName;
     if (filePath.endsWith(".desktop")) {
         auto list = recommandLayout->parentWidget()->findChildren<OpenWithDialog *>();
         auto ret = std::any_of(list.begin(), list.end(), [filePath](const OpenWithDialog *w) {
@@ -448,8 +506,14 @@ void OpenWithDialog::useOtherApplication()
 
         Properties desktop(filePath, "Desktop Entry");
 
-        if (desktop.value("MimeType").toString().isEmpty())
+        // 目前发现有些.desktop文件没有遵循规则写入MimeType
+        // 但是这里又是用户自己选中的这个app，那么这里就只判断是否是application
+        if (desktop.value("Type").toString() != "Application") {
+            qCWarning(logDFMBase()) << filePath << " is not Application!!";
             return;
+        }
+
+        iconName = desktop.value("Icon").toString();
 
         if (!QFile::link(filePath, targetDesktopFileName))
             return;
@@ -484,7 +548,7 @@ void OpenWithDialog::useOtherApplication()
         }
     }
 
-    OpenWithDialogListItem *item = createItem(QIcon::fromTheme("application-x-desktop"), info.fileName(), targetDesktopFileName);
+    OpenWithDialogListItem *item = createItem(iconName, info.fileName(), targetDesktopFileName);
 
     int otherLayoutSizeHintHeight = otherLayout->sizeHint().height();
     otherLayout->addWidget(item);
@@ -493,9 +557,9 @@ void OpenWithDialog::useOtherApplication()
     checkItem(item);
 }
 
-OpenWithDialogListItem *OpenWithDialog::createItem(const QIcon &icon, const QString &name, const QString &filePath)
+OpenWithDialogListItem *OpenWithDialog::createItem(const QString &iconName, const QString &name, const QString &filePath)
 {
-    OpenWithDialogListItem *item = new OpenWithDialogListItem(icon, name, this);
+    OpenWithDialogListItem *item = new OpenWithDialogListItem(iconName, name, this);
 
     item->setProperty("app", filePath);
     item->installEventFilter(this);
@@ -541,7 +605,7 @@ void OpenWithDialog::showEvent(QShowEvent *event)
 {
     BaseDialog::showEvent(event);
 
-    recommandLayout->parentWidget()->setFixedWidth(scrollArea->width());
+    recommandLayout->parentWidget()->setFixedWidth(scrollArea->viewport()->width());
     recommandLayout->parentWidget()->resize(recommandLayout->parentWidget()->layout()->sizeHint());
 }
 

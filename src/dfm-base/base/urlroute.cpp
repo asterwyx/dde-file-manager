@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,12 +8,30 @@
 #include <dfm-base/utils/fileutils.h>
 
 #include <QDir>
-#include <QRegularExpression>
 
 namespace dfmbase {
 
-QHash<QString, SchemeNode> UrlRoute::kSchemeInfos {};
-QMultiMap<int, QString> UrlRoute::kSchemeRealTree {};
+QHash<QString, SchemeNode> &UrlRoute::schemeInfos()
+{
+    static QHash<QString, SchemeNode> *s_schemeInfos = new QHash<QString, SchemeNode>();
+    return *s_schemeInfos;
+}
+
+QMultiMap<int, QString> &UrlRoute::schemeRealTree()
+{
+    static QMultiMap<int, QString> *s_schemeRealTree = new QMultiMap<int, QString>();
+    return *s_schemeRealTree;
+}
+
+static QString squeezeSlashes(QString path)
+{
+    int dup = path.indexOf(QLatin1String("//"));
+    while (dup >= 0) {
+        path.remove(dup, 1);
+        dup = path.indexOf(QLatin1String("//"), dup);
+    }
+    return path;
+}
 
 /*!
    \class UrlRoute
@@ -57,12 +75,11 @@ bool UrlRoute::regScheme(const QString &scheme,
             return false;
         }
 
-        QString temp = formatRoot;
-        temp.replace(QRegularExpression("/{1,}"), "/");
+        QString temp = squeezeSlashes(formatRoot);
         int treeLevel = temp.count("/") - 1;
-        kSchemeRealTree.insert(treeLevel, scheme);   // 缓存层级
+        schemeRealTree().insert(treeLevel, scheme);   // 缓存层级
     }
-    kSchemeInfos.insert(scheme, { formatRoot, icon, isVirtual, displayName });
+    schemeInfos().insert(scheme, { formatRoot, icon, isVirtual, displayName });
     finally.dismiss();
     return true;
 }
@@ -76,7 +93,7 @@ QIcon UrlRoute::icon(const QString &scheme)
 {
     if (!hasScheme(scheme))
         return QIcon();
-    return kSchemeInfos[scheme].pathIcon();
+    return schemeInfos()[scheme].pathIcon();
 }
 
 QString UrlRoute::toString(const QUrl &url, QUrl::FormattingOptions options)
@@ -84,7 +101,7 @@ QString UrlRoute::toString(const QUrl &url, QUrl::FormattingOptions options)
     if (!url.isValid())
         return "";
 
-    if (dfmbase::FileUtils::isLocalFile(url) || !hasScheme(url.scheme()))
+    if (url.isLocalFile() || !hasScheme(url.scheme()))
         return url.toString(options);
 
     QUrl tmpUrl { url };
@@ -100,7 +117,7 @@ QString UrlRoute::toString(const QUrl &url, QUrl::FormattingOptions options)
  */
 bool UrlRoute::hasScheme(const QString &scheme)
 {
-    return kSchemeInfos.keys().contains(scheme);
+    return schemeInfos().contains(scheme);
 }
 
 /*!
@@ -117,7 +134,7 @@ bool UrlRoute::isRootUrl(const QUrl &url)
 
     QUrl urlCmp;
     urlCmp.setScheme(url.scheme());
-    urlCmp.setPath(kSchemeInfos[url.scheme()].rootPath());
+    urlCmp.setPath(schemeInfos()[url.scheme()].rootPath());
 
     if (url.scheme() == urlCmp.scheme()
         && path == urlCmp.path())
@@ -136,7 +153,7 @@ bool UrlRoute::isVirtual(const QUrl &url)
     if (!hasScheme(url.scheme()))
         return false;
 
-    return kSchemeInfos[url.scheme()].virtualFlag;
+    return schemeInfos()[url.scheme()].virtualFlag;
 }
 
 /*!
@@ -211,7 +228,7 @@ QString UrlRoute::rootDisplayName(const QString &scheme)
 {
     if (!hasScheme(scheme))
         return "";
-    return kSchemeInfos[scheme].displayName();
+    return schemeInfos()[scheme].displayName();
 }
 
 QUrl UrlRoute::fromUserInput(const QString &userInput, bool preferredLocalPath)
@@ -274,7 +291,7 @@ QString UrlRoute::rootPath(const QString &scheme)
 {
     if (!hasScheme(scheme))
         return "";
-    return kSchemeInfos[scheme].path;
+    return schemeInfos()[scheme].path;
 }
 
 QUrl UrlRoute::rootUrl(const QString &scheme)
@@ -303,17 +320,16 @@ QUrl UrlRoute::rootUrl(const QString &scheme)
  */
 QUrl UrlRoute::pathToReal(const QString &path)
 {
-    QString temp = path;
-    temp.replace(QRegularExpression("/{1,}"), "/");
+    QString temp = squeezeSlashes(path);
     int treeLevel = temp.count("/");
     while (treeLevel >= 0) {
-        //同层级所有的scheme
-        auto &&schemeList = kSchemeRealTree.values(treeLevel);
+        // 同层级所有的scheme
+        auto &&schemeList = schemeRealTree().values(treeLevel);
         for (auto val : schemeList) {
             if (val == dfmbase::Global::Scheme::kAsyncFile)
                 continue;
             // 包含映射的根路径，判断是否转换为当前scheme
-            QString rootPath = kSchemeInfos[val].rootPath();
+            QString rootPath = schemeInfos()[val].rootPath();
             if (path.contains(rootPath)
                 || QString(path + "/").contains(rootPath)) {
                 QUrl result = pathToUrl(path, val);
@@ -344,7 +360,7 @@ bool UrlRoute::isVirtual(const QString &scheme)
 {
     if (!hasScheme(scheme))
         return false;
-    return kSchemeInfos[scheme].isVirtual();
+    return schemeInfos()[scheme].isVirtual();
 }
 
 /*!
@@ -358,12 +374,12 @@ QUrl UrlRoute::pathToUrl(const QString &path, const QString &scheme)
     if (!hasScheme(scheme))
         return QUrl();
 
-    QString rootPath = kSchemeInfos[scheme].rootPath();
+    QString rootPath = schemeInfos()[scheme].rootPath();
     if (rootPath.isEmpty())
         return QUrl();
 
     QString tempPath = path;
-    tempPath = tempPath.replace(0, rootPath.size(), "/");   //制空映射前缀
+    tempPath = tempPath.replace(0, rootPath.size(), "/");   // 制空映射前缀
     QUrl result;
     result.setScheme(scheme);
     result.setPath(tempPath);
@@ -381,8 +397,7 @@ QString UrlRoute::urlToPath(const QUrl &url)
     if (!hasScheme(url.scheme()))
         return "";
 
-    QString result = kSchemeInfos[url.scheme()].rootPath() + url.path();
-    result.replace(QRegularExpression("/{1,}"), "/");
+    QString result = squeezeSlashes(schemeInfos()[url.scheme()].rootPath() + url.path());
     return result;
 }
 

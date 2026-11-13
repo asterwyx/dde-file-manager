@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,6 +17,8 @@
 
 namespace dfmbase {
 namespace Global {
+inline constexpr int kOpenNewWindowMaxCount = 50;
+
 enum class ViewMode {
     kNoneMode = 0x00,
     kIconMode = 0x01,
@@ -25,6 +27,21 @@ enum class ViewMode {
     kTreeMode = 0x08,
     kAllViewMode = kIconMode | kListMode | kExtendMode
 };
+
+enum class DirectoryLoadStrategy : uint8_t {
+    kCreateNew,   // 默认策略：每次切换目录时立即清空视图
+    kPreserve   // 保留策略：保留现有视图内容，直到新目录数据加载完成后再更新视图
+};
+
+namespace ViewCustomKeys {
+inline constexpr char kSupportIconMode[] { "Custom_Key_SupportIconMode" };
+inline constexpr char kSupportListMode[] { "Custom_Key_SupportListMode" };
+inline constexpr char kSupportTreeMode[] { "Custom_Key_SupportTreeMode" };
+inline constexpr char kDefaultViewMode[] { "Custom_Key_DefaultViewMode" };
+inline constexpr char kDefaultListHeight[] { "Custom_Key_DefaultListHeight" };
+inline constexpr char kAllowChangeListHeight[] { "Custom_Key_AllowChangeListHeight" };
+inline constexpr char kViewModeUrlCallback[] { "Custom_Key_ViewModeUrlCallback" };
+}   // namespace ViewCustomKeys
 
 enum class TransparentStatus : uint8_t {
     kDefault,
@@ -43,6 +60,7 @@ enum ThumbnailSize {
     kSmall = 64,
     kNormal = 128,
     kLarge = 256,
+    kXLarge = 512,
 };
 
 enum ItemRoles {
@@ -79,6 +97,7 @@ enum ItemRoles {
     kItemFileNameOfRenameRole = Qt::UserRole + 14,
     kItemFileBaseNameOfRenameRole = Qt::UserRole + 15,
     kItemFileSuffixOfRenameRole = Qt::UserRole + 16,
+    kItemFileIconNameRole = Qt::UserRole + 48, // item file real file icon name
     kItemFileIconModelToolTipRole = Qt::UserRole + 19,
     kItemFileOriginalPath = Qt::UserRole + 23,
     kItemFileDeletionDate = Qt::UserRole + 24,
@@ -93,7 +112,19 @@ enum ItemRoles {
     kItemCreateFileInfoRole = Qt::UserRole + 33,
     kItemTreeViewDepthRole = Qt::UserRole + 34,
     kItemTreeViewExpandedRole = Qt::UserRole + 35,
-    kItemTreeViewCanExpandRole = Qt::UserRole + 36, // item can expand
+    kItemTreeViewCanExpandRole = Qt::UserRole + 36,   // item can expand
+    kItemUpdateAndTransFileInfoRole = Qt::UserRole + 37,
+    kItemFileContentPreviewRole = Qt::UserRole + 38,   // item file content
+    kItemIsGroupHeaderType = Qt::UserRole + 39,
+    kItemGroupHeaderKey = Qt::UserRole + 40,
+    kItemGroupDisplayIndex = Qt::UserRole + 41,
+    kItemGroupExpandedRole = Qt::UserRole + 42,
+    kItemGroupFileCount = Qt::UserRole + 43,
+    kItemFileIconRole = Qt::UserRole + 44,   // item file really icon, not thumnal
+    kItemHighlightKeywordsRole = Qt::UserRole + 45,   // per-item highlight keywords (semantic search etc.)
+    kItemGroupTruncatedRole = Qt::UserRole + 46,
+    kItemGroupTruncationEnabledRole = Qt::UserRole + 47,
+
     kItemUnknowRole = Qt::UserRole + 999
 };
 
@@ -112,7 +143,8 @@ enum CreateFileInfoType : uint8_t {
     kCreateFileInfoSync = 1,
     kCreateFileInfoAsync = 2,
     kCreateFileInfoSyncAndCache = 3,   // create file info Synchronize and cache file info
-    kCreateFileInfoAsyncAndCache = 4   // create file info Asynchronous and cache file info
+    kCreateFileInfoAsyncAndCache = 4,   // create file info Asynchronous and cache file info
+    kCreateFileInfoAutoNoCache = 5,   // can not cache file info, virtual schema will synchronize create file info
 };
 
 namespace Mime {
@@ -121,10 +153,14 @@ inline constexpr char kTypeCdImage[] { "application/x-cd-image" };
 inline constexpr char kTypeISO9660Image[] { "application/x-iso9660-image" };
 inline constexpr char kTypeAppXml[] { "application/xml" };
 inline constexpr char kTypeAppPdf[] { "application/pdf" };
+inline constexpr char kTypeAppPptx[] { "application/vnd.openxmlformats-officedocument.presentationml.presentation" };
 inline constexpr char kTypeAppMxf[] { "application/mxf" };
 inline constexpr char kTypeAppVMAsf[] { "application/vnd.ms-asf" };
 inline constexpr char kTypeAppCRRMedia[] { "application/cnd.rn-realmedia" };
 inline constexpr char kTypeAppVRRMedia[] { "application/vnd.rn-realmedia" };
+inline constexpr char kTypeAppAppimage[] { "application/vnd.appimage" };
+inline constexpr char kTypeAppKrita[] { "application/x-krita" };
+inline constexpr char kTypeAppUab[] { "application/vnd.linyaps.uab" };
 inline constexpr char kTypeTextHtml[] { "text/html" };
 inline constexpr char kTypeAppXhtmlXml[] { "application/xhtml+xml" };
 inline constexpr char kTypeTextXPython[] { "text/x-python" };
@@ -167,6 +203,8 @@ inline constexpr char kDesktop[] { "desktop" };
 inline constexpr char kMtp[] { "mtp" };
 inline constexpr char kAfc[] { "afc" };
 inline constexpr char kDav[] { "dav" };
+inline constexpr char kDavs[] { "davs" };
+inline constexpr char kNfs[] { "nfs" };
 inline constexpr char kEntry[] { "entry" };
 inline constexpr char kBurn[] { "burn" };
 inline constexpr char kComputer[] { "computer" };
@@ -187,7 +225,7 @@ inline constexpr char kDfmDBName[] { "dfmruntime.db" };
 namespace DataPersistence {
 // groups
 inline constexpr char kReportGroup[] { "Report" };
-//keys
+// keys
 inline constexpr char kDesktopStartUpReportKey[] { "DesktopStartUp" };
 inline constexpr char kDesktopLaunchTime[] { "DesktopLaunchTime" };
 inline constexpr char kDesktopDrawWallpaperTime[] { "DrawWallPaperTime" };

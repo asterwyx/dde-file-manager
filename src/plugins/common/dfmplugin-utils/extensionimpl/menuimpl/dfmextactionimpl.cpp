@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,6 +7,8 @@
 #include "private/dfmextmenuimpl_p.h"
 #include "dfmextmendefine.h"
 #include "dfmextmenuimpl.h"
+
+#include <dfm-base/dfm_menu_defines.h>
 
 #include <QAction>
 #include <QMenu>
@@ -123,6 +125,23 @@ std::string DFMExtActionImplPrivate::toolTip() const
 {
     if (action)
         return action->toolTip().toStdString();
+
+    return "";
+}
+
+void DFMExtActionImplPrivate::setActionId(const std::string &actionId)
+{
+    if (interiorEntity)
+        return;
+
+    if (action)
+        action->setProperty(dfmbase::ActionPropertyKey::kActionID, QString::fromStdString(actionId));
+}
+
+std::string DFMExtActionImplPrivate::actionId() const
+{
+    if (action)
+        return action->property(dfmbase::ActionPropertyKey::kActionID).toString().toStdString();
 
     return "";
 }

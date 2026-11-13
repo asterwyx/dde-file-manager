@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,11 +42,12 @@ VaultUnlockPages::VaultUnlockPages(QWidget *parent)
 {
     setWindowFlags(windowFlags() & ~Qt::WindowMinMaxButtonsHint);
     if (WindowUtils::isWayLand()) {
+        fmDebug() << "Vault: Setting Wayland window properties for unlock pages";
         this->windowHandle()->setProperty("_d_dwayland_minimizable", false);
         this->windowHandle()->setProperty("_d_dwayland_maximizable", false);
         this->windowHandle()->setProperty("_d_dwayland_resizable", false);
     }
-    setIcon(QIcon::fromTheme("dfm_vault"));
+    setIcon(QIcon::fromTheme("safebox"));
     connect(this, &VaultUnlockPages::buttonClicked, this, &VaultUnlockPages::onButtonClicked);
     setOnButtonClickedClose(false);
 }
@@ -59,9 +60,13 @@ void VaultUnlockPages::pageSelect(PageType page)
 {
     switch (page) {
     case kUnlockPage: {
+        fmDebug() << "Vault: Creating unlock view page";
         unlockView = new UnlockView(this);
-        if (!getContents().isEmpty())
+        unlockView->setOldPasswordSchemeMigrationMode(isOldPasswordSchemeMigrationModeFlag);
+        if (!getContents().isEmpty()) {
+            fmDebug() << "Vault: Clearing existing contents for unlock view";
             clearContents(true);
+        }
         setTitle(unlockView->titleText());
         addContent(unlockView);
         clearButtons();
@@ -74,8 +79,10 @@ void VaultUnlockPages::pageSelect(PageType page)
         connect(unlockView, &UnlockView::sigBtnEnabled, this, &VaultUnlockPages::onSetBtnEnabled);
     } break;
     case kRecoverPage: {
+        fmDebug() << "Vault: Creating recovery key view page";
         recoveryKeyView = new RecoveryKeyView(this);
         if (!getContents().isEmpty()) {
+            fmDebug() << "Vault: Cleaning up previous page content for recovery view";
             QWidget *widget = getContent(0);
             widget->hide();
             clearContents(false);
@@ -91,8 +98,10 @@ void VaultUnlockPages::pageSelect(PageType page)
         connect(recoveryKeyView, &RecoveryKeyView::sigBtnEnabled, this, &VaultUnlockPages::onSetBtnEnabled);
     } break;
     case kRetrievePage: {
+        fmDebug() << "Vault: Creating retrieve password view page";
         retrievePasswordView = new RetrievePasswordView(this);
         if (!getContents().isEmpty()) {
+            fmDebug() << "Vault: Cleaning up previous page content for retrieve view";
             QWidget *widget = getContent(0);
             widget->hide();
             clearContents(false);
@@ -104,14 +113,21 @@ void VaultUnlockPages::pageSelect(PageType page)
         QStringList btnList = retrievePasswordView->btnText();
         addButton(btnList[0], false);
         addButton(btnList[1], true, ButtonType::ButtonRecommend);
+        getButton(1)->setEnabled(false);
         connect(retrievePasswordView, &RetrievePasswordView::signalJump, this, &VaultUnlockPages::pageSelect);
+        retrievePasswordView->setOldPasswordSchemeMigrationMode(isOldPasswordSchemeMigrationModeFlag);
         connect(retrievePasswordView, &RetrievePasswordView::sigBtnEnabled, this, &VaultUnlockPages::onSetBtnEnabled);
+        connect(retrievePasswordView, &RetrievePasswordView::sigCloseDialog, this, &VaultUnlockPages::close);
     } break;
     case kPasswordRecoverPage: {
+        fmDebug() << "Vault: Creating password recovery view page";
         passwordRecoveryView = new PasswordRecoveryView(this);
-        if (retrievePasswordView)
+        if (retrievePasswordView) {
+            fmDebug() << "Vault: Setting validation results from retrieve password view";
             passwordRecoveryView->setResultsPage(retrievePasswordView->ValidationResults());
+        }
         if (!getContents().isEmpty()) {
+            fmDebug() << "Vault: Cleaning up previous page content for password recovery view";
             QWidget *widget = getContent(0);
             widget->hide();
             clearContents(false);
@@ -132,13 +148,18 @@ void VaultUnlockPages::pageSelect(PageType page)
 
 void VaultUnlockPages::onButtonClicked(int index, const QString &text)
 {
+    fmDebug() << "Vault: Button clicked - index:" << index << "text:" << text;
     if (getContent(0) == unlockView) {
+        fmDebug() << "Vault: Forwarding button click to unlock view";
         unlockView->buttonClicked(index, text);
     } else if (getContent(0) == retrievePasswordView) {
+        fmDebug() << "Vault: Forwarding button click to retrieve password view";
         retrievePasswordView->buttonClicked(index, text);
     } else if (getContent(0) == recoveryKeyView) {
+        fmDebug() << "Vault: Forwarding button click to recovery key view";
         recoveryKeyView->buttonClicked(index, text);
     } else if (getContent(0) == passwordRecoveryView) {
+        fmDebug() << "Vault: Forwarding button click to password recovery view";
         passwordRecoveryView->buttonClicked(index, text);
     }
 }
@@ -146,4 +167,21 @@ void VaultUnlockPages::onButtonClicked(int index, const QString &text)
 void VaultUnlockPages::onSetBtnEnabled(int index, const bool &state)
 {
     getButton(index)->setEnabled(state);
+}
+
+void VaultUnlockPages::setOldPasswordSchemeMigrationMode(bool enabled)
+{
+    isOldPasswordSchemeMigrationModeFlag = enabled;
+    // 如果子页面已创建，同步设置标志
+    if (unlockView) {
+        unlockView->setOldPasswordSchemeMigrationMode(enabled);
+    }
+    if (retrievePasswordView) {
+        retrievePasswordView->setOldPasswordSchemeMigrationMode(enabled);
+    }
+}
+
+bool VaultUnlockPages::isOldPasswordSchemeMigrationMode() const
+{
+    return isOldPasswordSchemeMigrationModeFlag;
 }

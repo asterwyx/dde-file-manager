@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -33,7 +33,11 @@ AvfsUtils *AvfsUtils::instance()
 bool AvfsUtils::isSupportedArchives(const QUrl &url)
 {
     auto info = InfoFactory::create<FileInfo>(url);
-    if (!info) return false;
+    if (!info) {
+        fmDebug() << "Failed to create FileInfo for URL:" << url;
+        return false;
+    }
+
     return supportedArchives().contains(info->nameOf(NameInfoType::kMimeTypeName));
 }
 

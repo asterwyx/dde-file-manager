@@ -1,58 +1,41 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(dfmplugin-vault)
+set(BIN_NAME dfm-vault-plugin)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-FILE(GLOB VAULT_FILES
+# Include DFM plugin configuration module
+include(DFMPluginConfig)
+
+FILE(GLOB_RECURSE VAULT_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*/*/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.json"
     )
 
-find_package(Dtk COMPONENTS Widget REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(polkit REQUIRED polkit-agent-1 polkit-qt5-1)
-pkg_check_modules(openssl REQUIRED libcrypto)
-
-add_library(${PROJECT_NAME}
+add_library(${BIN_NAME}
     SHARED
     ${VAULT_FILES}
 )
 
-set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ../../)
+set_target_properties(${BIN_NAME} PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${DFM_BUILD_PLUGIN_FILEMANAGER_DIR})
 
-target_include_directories(${PROJECT_NAME}
-    PUBLIC
-        ${DtkWidget_INCLUDE_DIRS}
-)
-
-target_link_libraries(${PROJECT_NAME}
-    DFM::base
-    DFM::framework
-    ${DtkWidget_LIBRARIES}
-    ${polkit_LIBRARIES}
-    ${openssl_LIBRARIES}
-)
+# Use DFM plugin configuration system
+include(${CMAKE_CURRENT_SOURCE_DIR}/dependencies.cmake)
+dfm_setup_vault_dependencies(${BIN_NAME})
 
 install(FILES polkit/com.deepin.filemanager.vault.policy
     DESTINATION ${CMAKE_INSTALL_PREFIX}/share/polkit-1/actions)
 
 #install library file
 install(TARGETS
-    ${PROJECT_NAME}
+    ${BIN_NAME}
     LIBRARY
     DESTINATION
-    ${DFM_PLUGIN_FILEMANAGER_EDGE_DIR}
+    ${DFM_PLUGIN_FILEMANAGER_CORE_DIR}
 )
 
 # install dconfig files.
-include(${CMAKE_SOURCE_DIR}/install_dconfig.cmake)
 INSTALL_DCONFIG("org.deepin.dde.file-manager.vault.json")

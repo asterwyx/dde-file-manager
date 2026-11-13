@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <dfm-framework/event/eventdispatcher.h>
+#include <dfm-framework/lifecycle/lifecycle.h>
 
 #include <QtConcurrent>
 
@@ -17,15 +18,28 @@ bool EventDispatcher::dispatch()
 
 bool EventDispatcher::dispatch(const QVariantList &params)
 {
-    if (std::any_of(filterList.begin(), filterList.end(), [params](const EventHandler<Listener> &h) {
-            return h.handler(params).toBool();
+    // Short-circuit during process shutdown: signal handlers/filters may touch
+    // Q_GLOBAL_STATIC singletons (Settings, Application) that are already
+    // destroyed in unspecified atexit order. Also covers asyncDispatch(),
+    // which forwards here via QtConcurrent::run.
+    if (Q_UNLIKELY(LifeCycle::isShuttingDown())) {
+        qCDebug(logDPF) << "EventDispatcher: dropping dispatch during shutdown";
+        return true;
+    }
+
+    auto filtersCopy = filterList;
+    auto handlersCopy = handlerList;
+
+    if (std::any_of(filtersCopy.begin(), filtersCopy.end(), [params](const EventHandler<Listener> &h) {
+            return h.handler && h.handler(params).toBool();
         })) {
         return false;
     }
 
-    std::for_each(handlerList.begin(), handlerList.end(), [params](const EventHandler<Listener> &h) {
-        h.handler(params);
-    });
+    for (const auto &h : handlersCopy) {
+        if (h.handler)
+            h.handler(params);
+    }
 
     return true;
 }
@@ -63,8 +77,8 @@ bool EventDispatcherManager::globalFiltered(EventType type, const QVariantList &
 {
     QReadLocker lk(&rwLock);
 
-    int size { globalFilterMap.size() };
-    for (int i = 0; i != size; ++i) {
+    qsizetype size { globalFilterMap.size() };
+    for (qsizetype i = 0; i != size; ++i) {
         auto key { globalFilterMap.keys()[i] };
         if (key) {
             auto func { globalFilterMap.value(key) };

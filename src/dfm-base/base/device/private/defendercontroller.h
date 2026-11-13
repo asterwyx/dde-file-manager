@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,8 +26,8 @@ private:
 
     bool isScanning(const QUrl &url);
     bool isScanning(const QList<QUrl> &urls);
-    bool stopScanning(const QUrl &url);
-    bool stopScanning(const QList<QUrl> &urls);
+    void stopScanning(const QUrl &url);
+    void stopScanning(const QList<QUrl> &urls);
 
     Q_SLOT void scanningUsbPathsChanged(const QStringList &list);
 

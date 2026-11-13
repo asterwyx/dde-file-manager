@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -19,7 +19,8 @@
 DWIDGET_USE_NAMESPACE
 using namespace ddplugin_organizer;
 
-SizeSlider::SizeSlider(QWidget *parent) : ContentBackgroundWidget(parent)
+SizeSlider::SizeSlider(QWidget *parent)
+    : ContentBackgroundWidget(parent)
 {
     dpfSignalDispatcher->subscribe("ddplugin_canvas", "signal_CanvasManager_IconSizeChanged", this, &SizeSlider::syncIconLevel);
 }
@@ -43,6 +44,8 @@ void SizeSlider::init()
     box->addWidget(label);
 
     slider = new DSlider(Qt::Horizontal, this);
+    slider->setObjectName("Slider");
+    slider->setAccessibleName("Slider");
     box->addWidget(slider);
 
     QIcon empty = QIcon::fromTheme("empty");
@@ -81,12 +84,6 @@ void SizeSlider::resetToIcon()
     int max = CollectionItemDelegate::maximumIconLevel();
     int cur = iconLevel();
 
-    if (CfgPresenter->isEnable()) {
-        max -= 2;
-        if (cur > max)
-            cur = max;
-    }
-
     Q_ASSERT(max >= min && min > -1);
 
     label->setText(tr("Icon size"));
@@ -99,7 +96,9 @@ void SizeSlider::resetToIcon()
 
     if (min > cur || max < cur) {
         fmCritical() << QString("canvas icon level %0 is out of range %1 ~ %2.")
-                       .arg(cur).arg(min).arg(max);
+                                .arg(cur)
+                                .arg(min)
+                                .arg(max);
         cur = min;
     }
 
@@ -130,10 +129,10 @@ void SizeSlider::iconClicked(DSlider::SliderIcons icon, bool checked)
         if (cur >= min)
             slider->setValue(cur);
     } else {
-      int max = slider->maximum();
-      cur++;
-      if (cur <= max)
-          slider->setValue(cur);
+        int max = slider->maximum();
+        cur++;
+        if (cur <= max)
+            slider->setValue(cur);
     }
 }
 

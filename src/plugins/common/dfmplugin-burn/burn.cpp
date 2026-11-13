@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,25 +9,58 @@
 #include "utils/burnsignalmanager.h"
 #include "events/burneventreceiver.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/base/device/devicemanager.h>
 #include <dfm-base/base/device/deviceutils.h>
-#include <dfm-base/base/application/application.h>
-#include <dfm-base/base/application/settings.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
+#include <dfm-base/dbusservice/global_server_defines.h>
+#include <dfm-base/dbusservice/opticalshareproxy.h>
 
 #include <QWidget>
 #include <QTimer>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+
 
 DFMBASE_USE_NAMESPACE
 namespace dfmplugin_burn {
 
-DFM_LOG_REISGER_CATEGORY(DPBURN_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPBURN_NAMESPACE)
 
 static constexpr char kCurrentEventSpace[] { DPF_MACRO_TO_STR(DPBURN_NAMESPACE) };
+
+namespace {
+
+void clearStaleBurnStates()
+{
+    // On session bus, the daemon runs as the current user, so all stored
+    // burn states belong to this user. Clear all stale states from the
+    // previous session on startup.
+    //
+    // Use async D-Bus calls so the main thread is never blocked while
+    // waiting for the daemon service to activate or respond.
+    auto pending = OpticalShareProxy::instance().burnStatesAsync();
+    auto *watcher = new QDBusPendingCallWatcher(pending);
+    QObject::connect(watcher, &QDBusPendingCallWatcher::finished,
+                     &OpticalShareProxy::instance(), [](QDBusPendingCallWatcher *w) {
+        w->deleteLater();
+        QDBusPendingReply<QVariantMap> reply = *w;
+        if (!reply.isValid()) {
+            fmWarning() << "[clearStaleBurnStates] invalid reply, error:" << reply.error().message();
+            return;
+        }
+
+        const QVariantMap states = reply.value();
+        for (auto iter = states.cbegin(); iter != states.cend(); ++iter) {
+            OpticalShareProxy::instance().clearBurnStateAsync(iter.key());
+        }
+    });
+}
+
+}   // namespace
 
 void Burn::initialize()
 {
@@ -38,14 +71,20 @@ void Burn::initialize()
 
 bool Burn::start()
 {
+    fmDebug() << "[Burn::start] Begin";
+
     dfmplugin_menu_util::menuSceneRegisterScene(SendToDiscMenuCreator::name(), new SendToDiscMenuCreator);
     bindScene("ShareMenu");
 
     DiscStateManager::instance()->initilaize();
 
-    connect(Application::dataPersistence(), &Settings::valueChanged, this, &Burn::onPersistenceDataChanged, Qt::DirectConnection);
-    Application::dataPersistence()->removeGroup(Persistence::kBurnStateGroup);
+    clearStaleBurnStates();
+    connect(&OpticalShareProxy::instance(), &OpticalShareProxy::burnStateChanged,
+            this, &Burn::onPersistenceDataChanged, Qt::DirectConnection);
+
+    fmDebug() << "[Burn::start] Calling startOpticalDiscScan...";
     DevMngIns->startOpticalDiscScan();
+    fmInfo() << "[Burn::start] startOpticalDiscScan returned";
 
     QString err;
     auto ret = DConfigManager::instance()->addConfig("org.deepin.dde.file-manager.burn", &err);
@@ -103,15 +142,13 @@ bool Burn::changeUrlEventFilter(quint64 windowId, const QUrl &url)
     return false;
 }
 
-void Burn::onPersistenceDataChanged(const QString &group, const QString &key, const QVariant &value)
+void Burn::onPersistenceDataChanged(const QString &key, const QVariantMap &value)
 {
-    if (group != Persistence::kBurnStateGroup)
-        return;
-
     fmInfo() << "Burn working state changed: " << key << value;
-    auto &&map { value.toMap() };
-    auto &&id { map[Persistence::kIdKey].toString() };
-    auto &&working { map[Persistence::kWoringKey].toBool() };
+    auto id { value[GlobalServerDefines::OpticalShareField::kId].toString() };
+    if (id.isEmpty())
+        id = DeviceUtils::getBlockDeviceId(key);
+    auto &&working { value[GlobalServerDefines::OpticalShareField::kWorking].toBool() };
     emit DevMngIns->opticalDiscWorkStateChanged(id, key, working);
 }
 

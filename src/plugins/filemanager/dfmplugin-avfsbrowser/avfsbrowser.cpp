@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,7 +10,7 @@
 #include "menu/avfsmenuscene.h"
 #include "events/avfseventhandler.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/base/schemefactory.h>
@@ -23,7 +23,7 @@ Q_DECLARE_METATYPE(QList<QUrl> *)
 Q_DECLARE_METATYPE(QList<QVariantMap> *);
 
 namespace dfmplugin_avfsbrowser {
-DFM_LOG_REISGER_CATEGORY(DPAVFSBROWSER_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPAVFSBROWSER_NAMESPACE)
 
 DFMBASE_USE_NAMESPACE
 

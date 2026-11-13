@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -14,7 +14,7 @@
 #include "menus/packetwritingmenuscene.h"
 #include "events/opticaleventreceiver.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/base/urlroute.h>
@@ -36,7 +36,7 @@ Q_DECLARE_METATYPE(QString *);
 // using CreateTopWidgetCallback = std::function<dfmplugin_optical::OpticalMediaWidget *()>;
 
 namespace dfmplugin_optical {
-DFM_LOG_REISGER_CATEGORY(DPOPTICAL_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPOPTICAL_NAMESPACE)
 
 DFMBASE_USE_NAMESPACE
 
@@ -53,6 +53,7 @@ void Optical::initialize()
     dpfSignalDispatcher->installEventFilter(GlobalEventType::kChangeCurrentUrl, this, &Optical::changeUrlEventFilter);
     dpfSignalDispatcher->installEventFilter(GlobalEventType::kOpenNewWindow, this, &Optical::openNewWindowEventFilter);
     dpfSignalDispatcher->installEventFilter(GlobalEventType::kOpenNewWindow, this, &Optical::openNewWindowWithArgsEventFilter);
+
     // for blank disc
     connect(
             DevProxyMng, &DeviceProxyManager::blockDevPropertyChanged, this,
@@ -101,7 +102,6 @@ void Optical::bindFileOperations()
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_MoveToTrash", OpticalFileHelper::instance(), &OpticalFileHelper::moveToTrash);
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_DeleteFile", OpticalFileHelper::instance(), &OpticalFileHelper::moveToTrash);
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_OpenFileInPlugin", OpticalFileHelper::instance(), &OpticalFileHelper::openFileInPlugin);
-    dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_LinkFile", OpticalFileHelper::instance(), &OpticalFileHelper::linkFile);
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_WriteUrlsToClipboard", OpticalFileHelper::instance(), &OpticalFileHelper::writeUrlsToClipboard);
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_OpenInTerminal", OpticalFileHelper::instance(), &OpticalFileHelper::openFileInTerminal);
 }
@@ -114,8 +114,8 @@ bool Optical::packetWritingUrl(const QUrl &srcUrl, QUrl *url)
         if (DeviceUtils::isPWOpticalDiscDev(dev)) {
             const auto &mntUrl { OpticalHelper::localDiscFile(srcUrl) };
             if (mntUrl.isValid() && mntUrl.isLocalFile()) {
-                fmWarning() << "current media is packet writing: " << srcUrl;
                 *url = mntUrl;
+                fmInfo() << "Packet writing URL transformed from" << srcUrl << "to" << mntUrl;
                 return true;
             }
         }
@@ -131,6 +131,7 @@ void Optical::addCustomTopWidget()
     } };
 
     ShowTopWidgetCallback showCallback { [](QWidget *w, const QUrl &url) {
+        fmDebug() << "Showing optical media widget for URL:" << url;
         bool ret { true };
         OpticalMediaWidget *mediaWidget = qobject_cast<OpticalMediaWidget *>(w);
         if (mediaWidget)
@@ -142,6 +143,7 @@ void Optical::addCustomTopWidget()
     QVariantMap map {
         { "Property_Key_Scheme", Global::Scheme::kBurn },
         { "Property_Key_KeepShow", false },
+        { "Property_Key_KeepTop", false },
         { "Property_Key_CreateTopWidgetCallback", QVariant::fromValue(createCallback) },
         { "Property_Key_ShowTopWidgetCallback", QVariant::fromValue(showCallback) }
     };
@@ -180,8 +182,8 @@ void Optical::bindEvents()
                             &OpticalEventReceiver::handleDropFiles);
     dpfHookSequence->follow("dfmplugin_workspace", "hook_ShortCut_PasteFiles", &OpticalEventReceiver::instance(),
                             &OpticalEventReceiver::handleBlockShortcutPaste);
-    dpfHookSequence->follow("dfmplugin_workspace", "hook_Tab_Closeable", &OpticalEventReceiver::instance(),
-                            &OpticalEventReceiver::handleTabClosable);
+    dpfHookSequence->follow("dfmplugin_titlebar", "hook_Tab_Closeable", &OpticalEventReceiver::instance(),
+                            &OpticalEventReceiver::handleTabCloseable);
     dpfHookSequence->follow("dfmplugin_titlebar", "hook_Crumb_Seprate", &OpticalEventReceiver::instance(), &OpticalEventReceiver::sepateTitlebarCrumb);
     dpfHookSequence->follow("dfmplugin_detailspace", "hook_Icon_Fetch", &OpticalEventReceiver::instance(), &OpticalEventReceiver::detailViewIcon);
 }
@@ -193,7 +195,8 @@ void Optical::bindWindows()
         Q_UNUSED(id)
         addOpticalCrumbToTitleBar();
     });
-    connect(&FMWindowsIns, &FileManagerWindowsManager::windowOpened, this,
+    connect(
+            &FMWindowsIns, &FileManagerWindowsManager::windowOpened, this,
             [this]() {
                 addOpticalCrumbToTitleBar();
             },
@@ -204,16 +207,22 @@ void Optical::onDiscChanged(const QString &id)
 {
     const auto &discUrl { OpticalHelper::transDiscRootById(id) };
     if (discUrl.isValid()) {
+        fmInfo() << "Emitting disc unmounted signal and closing tab for URL:" << discUrl;
         emit OpticalSignalManager::instance()->discUnmounted(discUrl);
-        dpfSlotChannel->push("dfmplugin_workspace", "slot_Tab_Close", discUrl);
+        dpfSlotChannel->push("dfmplugin_titlebar", "slot_Tab_Close", discUrl);
+    } else {
+        fmWarning() << "Failed to generate disc URL for device:" << id;
     }
 }
 
 void Optical::onDiscEjected(const QString &id)
 {
     const auto &discUrl { OpticalHelper::transDiscRootById(id) };
-    if (!discUrl.isValid())
+    if (!discUrl.isValid()) {
+        fmWarning() << "Invalid disc URL generated for ejected device:" << id;
         return;
+    }
+
     const QString &devFile { OpticalHelper::burnDestDevice(discUrl) };
     const QString &mnt { DeviceUtils::getMountInfo(devFile) };
     if (!mnt.isEmpty()) {
@@ -231,6 +240,7 @@ bool Optical::changeUrlEventFilter(quint64 windowId, const QUrl &url)
     // 对于 UDF 2.01 的 DVD+/-W 的光盘刻录的方式是 packet writing
     // 因此直接跳转到挂载点即可
     if (packetWritingUrl(url, &mntUrl)) {
+        fmInfo() << "Redirecting URL change from" << url << "to packet writing mount point:" << mntUrl;
         QTimer::singleShot(0, this, [windowId, mntUrl]() {
             dpfSignalDispatcher->publish(GlobalEventType::kChangeCurrentUrl, windowId, mntUrl);
         });
@@ -245,6 +255,7 @@ bool Optical::openNewWindowEventFilter(const QUrl &url)
     // 对于 UDF 2.01 的 DVD+/-W 的光盘刻录的方式是 packet writing
     // 因此直接跳转到挂载点即可
     if (packetWritingUrl(url, &mntUrl)) {
+        fmInfo() << "Redirecting new window from" << url << "to packet writing mount point:" << mntUrl;
         QTimer::singleShot(0, this, [mntUrl]() {
             dpfSignalDispatcher->publish(GlobalEventType::kOpenNewWindow, mntUrl);
         });
@@ -259,6 +270,7 @@ bool Optical::openNewWindowWithArgsEventFilter(const QUrl &url, bool isNewWindow
     // 对于 UDF 2.01 的 DVD+/-W 的光盘刻录的方式是 packet writing
     // 因此直接跳转到挂载点即可
     if (packetWritingUrl(url, &mntUrl)) {
+        fmInfo() << "Redirecting new window with args from" << url << "to packet writing mount point:" << mntUrl;
         QTimer::singleShot(0, this, [mntUrl, isNewWindow]() {
             dpfSignalDispatcher->publish(GlobalEventType::kOpenNewWindow, mntUrl, isNewWindow);
         });

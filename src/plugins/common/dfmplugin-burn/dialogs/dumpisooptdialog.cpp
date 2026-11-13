@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,6 +12,7 @@
 #include <dfm-base/utils/windowutils.h>
 #include <dfm-base/utils/fileutils.h>
 #include <dfm-base/dbusservice/global_server_defines.h>
+#include <dfm-base/utils/protocolutils.h>
 
 #include <DFileDialog>
 #include <QWindow>
@@ -55,13 +56,16 @@ void DumpISOOptDialog::initliazeUi()
     addButton(QObject::tr("Cancel", "button"));
     int index = addButton(tr("Create ISO Image", "button"), true, DDialog::ButtonType::ButtonRecommend);
     createImgBtn = getButton(index);
-    if (createImgBtn)
+    if (createImgBtn) {
+        createImgBtn->setObjectName("CreateImgBtn");
+        createImgBtn->setAccessibleName("CreateImgBtn");
         createImgBtn->setEnabled(false);
+    }
     layout()->setContentsMargins(0, 0, 0, 0);
     contentWidget = new QWidget(this);
     // m_contentWidget->setStyleSheet("border: 1px solid red"); // debug
     QVBoxLayout *contentLay = new QVBoxLayout;
-    contentLay->setMargin(0);
+    contentLay->setContentsMargins(0, 0, 0, 0);
     contentWidget->setLayout(contentLay);
     addContent(contentWidget, Qt::AlignTop);
 
@@ -97,6 +101,8 @@ void DumpISOOptDialog::initliazeUi()
 
     // file chooser
     fileChooser = new DFileChooserEdit;
+    fileChooser->setObjectName("FileChooser");
+    fileChooser->setAccessibleName("FileChooser");
     fileChooser->setFileMode(QFileDialog::FileMode::Directory);
     const QString &stdDocPath = QStandardPaths::writableLocation(QStandardPaths::StandardLocation::DocumentsLocation);
     fileChooser->setDirectoryUrl(QUrl::fromLocalFile(stdDocPath));
@@ -166,8 +172,8 @@ void DumpISOOptDialog::onFileChoosed(const QString &fileName)
 void DumpISOOptDialog::onPathChanged(const QString &path)
 {
     const QUrl &url { UrlRoute::fromUserInput(path) };
-    if (url.isEmpty() || !url.isValid() || !dfmbase::FileUtils::isLocalFile(url)
-        || DeviceUtils::isLowSpeedDevice(url) || DeviceUtils::isSamba(url)) {
+    if (url.isEmpty() || !url.isValid() || !url.isLocalFile()
+        || ProtocolUtils::isRemoteFile(url) || ProtocolUtils::isSMBFile(url)) {
         fmWarning() << "Path:" << path << "is prohibited";
         createImgBtn->setEnabled(false);
         return;

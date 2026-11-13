@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,50 +40,6 @@ public:
      * @return 是否成功
      */
     static bool checkUserKey(const QString &userKey, QString &cipher);
-
-    /**
-     * @brief getEncryptedDir 获得加密文件夹路径
-     * @return
-     */
-    static QString getEncryptDir();
-
-    /**
-     * @brief getDecryptDir 获得解密文件夹路径
-     * @return
-     */
-    static QString getDecryptDir();
-
-    /**
-     * @brief getConfigFilePath
-     * @return
-     */
-    static QStringList getConfigFilePath();
-
-    /**
-     * @brief vaultState // 获得保险箱状态
-     * @return
-     */
-    static VaultState vaultState();
-
-    /**
-     * @brief getRootPassword 管理员权限认证
-     * @return
-     */
-    static bool getRootPassword();
-
-    /**
-    * @brief executionShellCommand 执行shell命令并获得shell命令的返回值
-    * @param strCmd 要执行的shell命令
-    * @param lstShellOutput shell命令返回的结果
-    * @return 返回值为0表示成功，其它都不成功
-    */
-    static int executionShellCommand(const QString &strCmd, QStringList &lstShellOutput);
-
-signals:
-
-public slots:
-
-private:
 };
 }
 #endif   // INTERFACEACTIVEVAULT_H

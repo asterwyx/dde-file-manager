@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -37,6 +37,15 @@ inline constexpr char kAnonymous[] { "anonymous" };
 }
 
 inline constexpr char kEventSpace[] { "dfmplugin_dirshare" };
+
+namespace ShareConfig {
+static constexpr char kShareConfigPath[] { "/var/lib/samba/usershares" };
+static constexpr char kShareName[] { "sharename" };
+static constexpr char kShareAcl[] { "usershare_acl" };
+static constexpr char kSharePath[] { "path" };
+static constexpr char kShareComment[] { "comment" };
+static constexpr char kGuestOk[] { "guest_ok" };
+}   // namespace ShareConfig
 
 DPDIRSHARE_END_NAMESPACE
 

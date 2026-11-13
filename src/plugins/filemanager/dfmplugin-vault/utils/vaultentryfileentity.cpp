@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -14,9 +14,9 @@ using namespace dfmplugin_vault;
 VaultEntryFileEntity::VaultEntryFileEntity(QObject *parent)
     : QObject(parent)
 {
-    fileCalculationUtils = new FileStatisticsJob;
-    connect(fileCalculationUtils, &FileStatisticsJob::dataNotify, this, &VaultEntryFileEntity::slotFileDirSizeChange);
-    connect(fileCalculationUtils, &FileStatisticsJob::finished, this, &VaultEntryFileEntity::slotFinishedThread);
+    fileCalculationUtils = new FileScanner;
+    connect(fileCalculationUtils, &FileScanner::progressChanged, this, &VaultEntryFileEntity::slotFileDirSizeChange);
+    connect(fileCalculationUtils, &FileScanner::finished, this, &VaultEntryFileEntity::slotFinishedThread);
 }
 
 VaultEntryFileEntity::~VaultEntryFileEntity()
@@ -27,12 +27,12 @@ VaultEntryFileEntity::~VaultEntryFileEntity()
 
 QString VaultEntryFileEntity::displayName() const
 {
-    return tr("My Vault");
+    return tr("File Vault");
 }
 
 QIcon VaultEntryFileEntity::icon() const
 {
-    return QIcon::fromTheme("dfm_safebox");
+    return QIcon::fromTheme("safebox");
 }
 
 bool VaultEntryFileEntity::exists() const
@@ -48,11 +48,13 @@ bool VaultEntryFileEntity::showProgress() const
 bool VaultEntryFileEntity::showTotalSize() const
 {
     if (VaultHelper::instance()->state(PathManager::vaultLockPath()) == VaultState::kUnlocked) {
+        fmDebug() << "Vault: Vault is unlocked, starting size calculation";
         showSizeState = true;
         QUrl url = VaultHelper::instance()->vaultToLocalUrl(VaultHelper::instance()->sourceRootUrl());
         fileCalculationUtils->start(QList<QUrl>() << url);
         return true;
     }
+    fmDebug() << "Vault: Vault is not unlocked, skipping size calculation";
     return false;
 }
 
@@ -84,12 +86,10 @@ QUrl VaultEntryFileEntity::targetUrl() const
     return VaultHelper::instance()->rootUrl();
 }
 
-void VaultEntryFileEntity::slotFileDirSizeChange(qint64 size, int filesCount, int directoryCount)
+void VaultEntryFileEntity::slotFileDirSizeChange(const DFMBASE_NAMESPACE::FileScanner::ScanResult &result)
 {
-    Q_UNUSED(filesCount)
-    Q_UNUSED(directoryCount)
     if (showSizeState) {
-        totalchange = size;
+        totalchange = result.totalSize;
         if (vaultTotal > 0 && totalchange > vaultTotal)
             vaultTotal = totalchange;
     }

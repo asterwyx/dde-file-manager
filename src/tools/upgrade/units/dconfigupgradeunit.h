@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,6 +26,11 @@ private:
     bool upgradeRecentConfigs();
     bool upgradeSearchConfigs();
     void clearDiskHidden();
+    void addOldGenericSettings();
+    bool checkOldGeneric(const QString &key);
+
+private:
+    QStringList oldGenericSettings;
 };
 }
 

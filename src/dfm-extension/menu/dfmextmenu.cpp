@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LGPL-3.0-or-later
 
 #include "private/dfmextmenuprivate.h"
 
 #include <dfm-extension/menu/dfmextmenu.h>
+#include <dfm-extension/menu/dfmextaction.h>
 
 #include <cassert>
 
@@ -60,6 +61,15 @@ DFMExtAction *DFMExtMenu::menuAction() const
 std::list<DFMExtAction *> DFMExtMenu::actions() const
 {
     return d->actions();
+}
+
+DFMExtAction *DFMExtMenu::findActionById(const std::string &actionId) const
+{
+    for (DFMExtAction *action : actions()) {
+        if (action && action->actionId() == actionId)
+            return action;
+    }
+    return nullptr;
 }
 
 void DFMExtMenu::triggered(DFMExtAction *action)

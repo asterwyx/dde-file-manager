@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -63,11 +63,13 @@ void SelectionSyncHelper::clearExteralSelection()
     if (!enabled || !external || !external->hasSelection())
         return;
 
+    external->setProperty("syncHelperClearing", true);
     // disconnect to prevent signal recursion
     disconnect(external, &QItemSelectionModel::selectionChanged, this, &SelectionSyncHelper::clearInnerSelection);
 
     // clear canvas selection if any selection was operated in collection.
     external->clear();
+    external->setProperty("syncHelperClearing", false);
 
     connect(external, &QItemSelectionModel::selectionChanged, this, &SelectionSyncHelper::clearInnerSelection);
 }

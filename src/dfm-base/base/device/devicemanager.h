@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -48,15 +48,6 @@ public:
     QVariantMap getProtocolDevInfo(const QString &id, bool needReload = false);
 
     // device operations
-#ifdef ENABLE_MOUNT_SYNC_FUNCTIONS
-    QString mountBlockDev(const QString &id, const QVariantMap &opts = {});
-    bool lockBlockDev(const QString &id, const QVariantMap &opts = {});
-    QString unlockBlockDev(const QString &id, const QString &passwd, const QVariantMap &opts = {});
-    bool powerOffBlockDev(const QString &id, const QVariantMap &opts = {});
-    bool renameBlockDev(const QString &id, const QString &newName, const QVariantMap &opts = {});
-    bool ejectBlockDev(const QString &id, const QVariantMap &opts = {});
-#endif
-
     void mountBlockDevAsync(const QString &id, const QVariantMap &opts = {}, CallbackType1 cb = nullptr, int timeout = 0);
     bool unmountBlockDev(const QString &id, const QVariantMap &opts = {});
     void unmountBlockDevAsync(const QString &id, const QVariantMap &opts = {}, CallbackType2 cb = nullptr);
@@ -85,15 +76,16 @@ public:
 
     void startPollingDeviceUsage();
     void stopPollingDeviceUsage();
+
+    void initUsageCache();
+    void refreshUsage();
+
     void enableBlockAutoMount();
 
     void startMonitor();
     void stopMonitor();
     bool isMonitoring();
     void startOpticalDiscScan();   // call once
-
-    void stopScanDrive(const QString &id);
-    void stopAllScanTask();
 
     void retryMount(const QString &id, DFMMOUNT::DeviceType type, int timeout);
 
@@ -114,10 +106,11 @@ Q_SIGNALS:
     void blockDevFsRemoved(const QString &id);
     void blockDevMountResult(const QString &id, bool result);
 
-    // these 3 signals is designed only for dock's opeartion.
+    // these 4 signals is designed only for dock's opeartion.
     void blockDevUnmountAsyncFailed(const QString &id, DFMMOUNT::DeviceError err);
     void blockDevEjectAsyncFailed(const QString &id, DFMMOUNT::DeviceError err);
     void blockDevPoweroffAysncFailed(const QString &id, DFMMOUNT::DeviceError err);
+    void protocolDevUnmountAsyncFailed(const QString &id, DFMMOUNT::DeviceError err);
 
     void protocolDevAdded(const QString &id);
     void protocolDevRemoved(const QString &id, const QString &oldMpt);
@@ -126,7 +119,7 @@ Q_SIGNALS:
 
     void opticalDiscWorkStateChanged(const QString &id, const QString &dev, bool working);
 
-    void mountNetworkDeviceResult(bool ret, DFMMOUNT::DeviceError err, const QString &msg);
+    void mountNetworkDeviceResult(const QString &address, bool ret, DFMMOUNT::DeviceError err, const QString &msg);
 
     void blockDevMountedManually(const QString &id, const QString &mpt);
 

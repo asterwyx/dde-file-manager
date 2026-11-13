@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vaultactivestartview.h"
 
 #include <dfm-framework/event/event.h>
+#include <dfm-base/utils/iconutils.h>
 
 #ifdef DTKWIDGET_CLASS_DSizeMode
 #    include <DSizeMode>
@@ -17,18 +18,14 @@
 #include <QSpacerItem>
 
 DWIDGET_USE_NAMESPACE
+DFMBASE_USE_NAMESPACE
 using namespace dfmplugin_vault;
 
 VaultActiveStartView::VaultActiveStartView(QWidget *parent)
-    : QWidget(parent)
+    : VaultBaseView(parent)
 {
     initUi();
     initConnect();
-}
-
-void VaultActiveStartView::slotStartBtnClicked()
-{
-    emit sigAccepted();
 }
 
 void VaultActiveStartView::initUi()
@@ -40,14 +37,16 @@ void VaultActiveStartView::initUi()
     pLabel2->setAlignment(Qt::AlignHCenter);
 
     DLabel *pLabel3 = new DLabel();
-    pLabel3->setPixmap(QIcon::fromTheme("dfm_vault_active_start").pixmap(88, 100));
+    pLabel3->setPixmap(IconUtils::hiDpiPixmap(QIcon::fromTheme("dfm_vault_active_start"), QSize(88, 100), this));
     pLabel3->setAlignment(Qt::AlignHCenter);
 
     startBtn = new DSuggestButton(tr("Create"), this);
+    startBtn->setObjectName("StartBtn");
+    startBtn->setAccessibleName("StartBtn");
     startBtn->setFixedWidth(200);
 
     QVBoxLayout *play = new QVBoxLayout(this);
-    play->setMargin(0);
+    play->setContentsMargins(0, 0, 0, 0);
     play->addWidget(titleLabel);
     play->addSpacing(5);
     play->addWidget(pLabel3);
@@ -78,7 +77,7 @@ void VaultActiveStartView::initUiForSizeMode()
 void VaultActiveStartView::initConnect()
 {
     connect(startBtn, &DPushButton::clicked,
-            this, &VaultActiveStartView::slotStartBtnClicked);
+            this, &VaultActiveStartView::accepted);
 #ifdef DTKWIDGET_CLASS_DSizeMode
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::sizeModeChanged, this, [this]() {
         initUiForSizeMode();

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,8 +40,9 @@ public:
 
 class UrlRoute
 {
-    static QHash<QString, SchemeNode> kSchemeInfos;   // info cache
-    static QMultiMap<int, QString> kSchemeRealTree;   // index cache
+private:
+    static QHash<QString, SchemeNode> &schemeInfos();   // info cache
+    static QMultiMap<int, QString> &schemeRealTree();   // index cache
 public:
     static bool regScheme(const QString &scheme,
                           const QString &root,

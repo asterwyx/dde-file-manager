@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -35,8 +35,10 @@ int dfm_tools_upgrade_doUpgrade(const QMap<QString, QString> &args)
 
     // is desktop or file manager?
     bool isDesktop = args.contains(kArgDesktop);
-    if (!isDesktop && !args.contains(kArgFileManger))
+    if (!isDesktop && !args.contains(kArgFileManger)) {
+        qCCritical(logToolUpgrade) << "Invalid arguments - neither desktop nor file manager specified";
         return -1;
+    }
 
     // check lock
     UpgradeLocker locker;
@@ -77,12 +79,14 @@ int dfm_tools_upgrade_doUpgrade(const QMap<QString, QString> &args)
 
 int dfm_tools_upgrade_doRestart(const QMap<QString, QString> &args)
 {
-    qCInfo(logToolUpgrade) << "upgrade args" << args;
+    qCInfo(logToolUpgrade) << "Starting restart process with arguments:" << args;
 
     // is desktop or file manager?
     bool isDesktop = args.contains(kArgDesktop);
-    if (!isDesktop && !args.contains(kArgFileManger))
+    if (!isDesktop && !args.contains(kArgFileManger)) {
+        qCCritical(logToolUpgrade) << "Invalid restart arguments - neither desktop nor file manager specified";
         return -1;
+    }
 
     // show dialog
     ProcessDialog dlg;

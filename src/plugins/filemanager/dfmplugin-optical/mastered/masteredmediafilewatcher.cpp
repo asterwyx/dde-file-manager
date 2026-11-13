@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,13 +38,17 @@ MasteredMediaFileWatcher::MasteredMediaFileWatcher(const QUrl &url, QObject *par
 {
     dptr = dynamic_cast<MasteredMediaFileWatcherPrivate *>(d.data());
     QString dev { OpticalHelper::burnDestDevice(url) };
-    if (dev.isEmpty())
+    if (dev.isEmpty()) {
+        fmWarning() << "Failed to get burn destination device for url:" << url;
         return;
+    }
     OpticalHelper::createStagingFolder(dev);
 
     QUrl urlStaging { OpticalHelper::localStagingFile(url) };
-    if (!urlStaging.isValid() || urlStaging.isEmpty())
+    if (!urlStaging.isValid() || urlStaging.isEmpty()) {
+        fmWarning() << "Invalid or empty staging URL for device:" << dev;
         return;
+    }
 
     dptr->proxyStaging = WatcherFactory::create<AbstractFileWatcher>(urlStaging, false);
     connect(dptr->proxyStaging.data(), &AbstractFileWatcher::fileAttributeChanged,
@@ -123,7 +127,7 @@ void MasteredMediaFileWatcher::onSubfileCreated(const QUrl &url)
         connect(fw, &QFutureWatcher<void>::finished, this, [fw, realUrl, url, this]() {
             bool ret { fw->result() };
             if (ret)
-                fmWarning() << "Dup file: " << url;
+                fmWarning() << "Duplicate file name detected:" << url << "real url:" << realUrl;
             emit subfileCreated(realUrl);
             delete fw;
         });

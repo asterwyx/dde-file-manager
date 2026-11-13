@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -24,8 +24,11 @@ public slots:
     void handleSearch(quint64 winId, const QString &keyword);
     void handleStopSearch(quint64 winId);
     void handleShowAdvanceSearchBar(quint64 winId, bool visible);
-    void handleUrlChanged(quint64 winId, const QUrl &u);
     void handleAddressInputStr(quint64 windId, QString *str);
+    void handleFileAdd(const QUrl &url);
+    void handleFileDelete(const QList<QUrl> &urls);
+    void handleFileRename(const QUrl &oldUrl, const QUrl &newUrl);
+    void handleUrlChanged(quint64 winId, const QUrl &url);
 
 private:
     explicit SearchEventReceiver(QObject *parent = nullptr);

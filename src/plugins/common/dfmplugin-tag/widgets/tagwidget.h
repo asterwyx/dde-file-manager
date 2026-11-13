@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,11 +26,13 @@ class TagWidget : public DTK_WIDGET_NAMESPACE::DFrame
 {
     Q_OBJECT
 public:
+    explicit TagWidget(QWidget *parent = nullptr);
     TagWidget(QUrl url, QWidget *parent = nullptr);
     ~TagWidget();
 
     void initialize();
     void setLayoutHorizontally(bool horizontal);
+    void setUrl(const QUrl &url);
     void loadTags(const QUrl &url);
     QWidget *tagTitle();
     QWidget *tagLeftTitle();
@@ -43,6 +45,7 @@ public slots:
     void onCrumbListChanged();
     void onCheckedColorChanged(const QColor &color);
     void onTagChanged(const QVariantMap &fileAndTags);
+    void onTagColorChanged(const QVariantMap &tagAndColorName);
     void filterInput();
 
 protected:

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,22 +6,26 @@
 
 #include <DApplication>
 #include <QDir>
-#include <QTextCodec>
 #include <QIcon>
+#include <QTimer>
 
 #include <dfm-base/dfm_plugin_defines.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 #include <dfm-base/utils/loggerrules.h>
+#include <dfm-base/utils/signalhandler.h>
+#include <dfm-base/utils/timezonewatcher.h>
 
 #include <dfm-framework/dpf.h>
 
-#include <signal.h>
+#include <csignal>
 
 Q_LOGGING_CATEGORY(logAppDialogWayland, "org.deepin.dde.filemanager.filedialog-wayland")
 
 DGUI_USE_NAMESPACE
 DWIDGET_USE_NAMESPACE
 DFMBASE_USE_NAMESPACE
+using namespace GlobalDConfDefines::ConfigPath;
+using namespace GlobalDConfDefines::BaseConfig;
 
 #ifdef DFM_ORGANIZATION_NAME
 #    define ORGANIZATION_NAME DFM_ORGANIZATION_NAME
@@ -33,16 +37,20 @@ static constexpr char kDialogPluginInterface[] { "org.deepin.plugin.filedialog" 
 static constexpr char kFmPluginInterface[] { "org.deepin.plugin.filemanager" };
 static constexpr char kCommonPluginInterface[] { "org.deepin.plugin.common" };
 
-static constexpr char kDialogCorePluginName[] { "filedialogplugin-core" };
-static constexpr char kDialogCoreLibName[] { "libfiledialogplugin-core.so" };
+static constexpr char kDialogCorePluginName[] { "filedialog-core-plugin" };
+static constexpr char kDialogCoreLibName[] { "libfiledialog-core-plugin.so" };
 static constexpr char kDFMCorePluginName[] { "dfmplugin-core" };
-static constexpr char kDFMCoreLibName[] { "libdfmplugin-core.so" };
+static constexpr char kDFMCoreLibName[] { "libdfm-core-plugin.so" };
 
-static void initLog()
+static void initLogFilter()
 {
 #ifdef DTKCORE_CLASS_DConfigFile
     LoggerRules::instance().initLoggerRules();
 #endif
+}
+
+static void initLogSetting()
+{
     dpfLogManager->applySuggestedLogSettings();
 }
 
@@ -59,6 +67,9 @@ static void initEnv()
     if (qEnvironmentVariable("CLUTTER_IM_MODULE") == QStringLiteral("fcitx")) {
         setenv("QT_IM_MODULE", "fcitx", 1);
     }
+
+    // 启动时区监视器和时区环境变量设置
+    dfmbase::TimezoneWatcher::instance().init();
 }
 
 static bool singlePluginLoad(const QString &pluginName, const QString &libName)
@@ -97,7 +108,7 @@ static bool blackListFilter(const QString &name)
     {
         // FIXME(zhangsheng) FIXME(xust): find another way to solve this.
         static const QStringList tmpWhiteList {
-            "dfmplugin-disk-encrypt", "dfmplugin-encrypt-manager"
+            "dfmplugin-disk-encrypt"
         };
         if (tmpWhiteList.contains(name))
             return false;
@@ -112,15 +123,15 @@ static bool pluginsLoad()
 {
     QString msg;
     if (!DConfigManager::instance()->addConfig(kPluginsDConfName, &msg))
-        qCWarning(logAppDialogWayland) << "Load plugins but dconfig failed: " << msg;
+        qCWarning(logAppDialogWayland) << "pluginsLoad: Failed to load plugins dconfig:" << msg;
 
     QStringList pluginsDirs;
 #ifdef QT_DEBUG
     const QString &pluginsDir { DFM_BUILD_PLUGIN_DIR };
-    qCInfo(logAppDialogWayland) << QString("Load plugins path : %1").arg(pluginsDir);
+    qCInfo(logAppDialogWayland) << "pluginsLoad: Using debug plugins path:" << pluginsDir;
     pluginsDirs.push_back(pluginsDir + "/filemanager");
     pluginsDirs.push_back(pluginsDir + "/common");
-    pluginsDirs.push_back(pluginsDir);
+    pluginsDirs.push_back(pluginsDir + "/filedialog");
 #else
     pluginsDirs << QString(DFM_PLUGIN_COMMON_CORE_DIR)
                 << QString(DFM_PLUGIN_FILEMANAGER_CORE_DIR)
@@ -128,59 +139,56 @@ static bool pluginsLoad()
                 << QString(DFM_PLUGIN_FILEMANAGER_EDGE_DIR);
 #endif
 
-    qCInfo(logAppDialogWayland) << "Using plugins dir:" << pluginsDirs;
+    qCInfo(logAppDialogWayland) << "pluginsLoad: Using plugins directories:" << pluginsDirs;
     DPF_NAMESPACE::LifeCycle::initialize({ kDialogPluginInterface,
                                            kFmPluginInterface,
                                            kCommonPluginInterface },
                                          pluginsDirs);
     DPF_NAMESPACE::LifeCycle::setLazyloadFilter(lazyLoadFilter);
     DPF_NAMESPACE::LifeCycle::setBlackListFilter(blackListFilter);
+    DPF_NAMESPACE::LifeCycle::registerQtVersionInsensitivePlugins(Plugins::Utils::filemanagerAllPlugins());
 
-    qCInfo(logAppDialogWayland) << "Depend library paths:" << DApplication::libraryPaths();
-    qCInfo(logAppDialogWayland) << "Load plugin paths: " << dpf::LifeCycle::pluginPaths();
+    qCInfo(logAppDialogWayland) << "pluginsLoad: Library paths:" << DApplication::libraryPaths();
+    qCInfo(logAppDialogWayland) << "pluginsLoad: Plugin paths:" << dpf::LifeCycle::pluginPaths();
 
     // read all plugins in setting paths
-    if (!DPF_NAMESPACE::LifeCycle::readPlugins())
+    if (!DPF_NAMESPACE::LifeCycle::readPlugins()) {
+        qCCritical(logAppDialogWayland) << "pluginsLoad: Failed to read plugins";
         return false;
+    }
 
     // We should make sure that the core plugin is loaded first
     if (!singlePluginLoad(kDialogCorePluginName, kDialogCoreLibName)) {
-        qCWarning(logAppDialogWayland) << "Load" << kDialogCorePluginName << "failed";
+        qCCritical(logAppDialogWayland) << "pluginsLoad: Failed to load dialog core plugin:" << kDialogCorePluginName;
         return false;
     }
     if (!singlePluginLoad(kDFMCorePluginName, kDFMCoreLibName)) {
-        qCWarning(logAppDialogWayland) << "Load" << kDFMCorePluginName << "failed";
+        qCCritical(logAppDialogWayland) << "pluginsLoad: Failed to load DFM core plugin:" << kDFMCorePluginName;
         return false;
     }
 
     // load plugins without core
-    if (!DPF_NAMESPACE::LifeCycle::loadPlugins())
+    if (!DPF_NAMESPACE::LifeCycle::loadPlugins()) {
+        qCCritical(logAppDialogWayland) << "pluginsLoad: Failed to load remaining plugins";
         return false;
-
-    return true;
-}
-
-static void handleSIGTERM(int sig)
-{
-    qCCritical(logAppDialogWayland) << "break with !SIGTERM! " << sig;
-
-    if (qApp) {
-        qApp->setProperty("SIGTERM", true);
-        qApp->quit();
     }
+
+    qCInfo(logAppDialogWayland) << "pluginsLoad: All plugins loaded successfully";
+    return true;
 }
 
 int main(int argc, char *argv[])
 {
     initEnv();
-    initLog();
-
-    // Fixed the locale codec to utf-8
-    QTextCodec::setCodecForLocale(QTextCodec::codecForName("utf-8"));
+    initLogFilter();
 
     DApplication a(argc, argv);
+
+    // BUG-278055
+    initLogSetting();
+
+    a.setLayoutDirection(Qt::LeftToRight);
     a.setOrganizationName(ORGANIZATION_NAME);
-    a.setAttribute(Qt::AA_UseHighDpiPixmaps);
     a.setQuitOnLastWindowClosed(false);
     a.setProperty("GTK", true);
     a.setWindowIcon(QIcon::fromTheme("dde-file-manager"));
@@ -193,21 +201,30 @@ int main(int argc, char *argv[])
         a.setApplicationName(appName);
     }
 
-    signal(SIGTERM, handleSIGTERM);
+    qCInfo(logAppDialogWayland) << "main: Wayland file dialog application started, version:" << a.applicationVersion();
+
+    auto *signalHandler = SignalHandler::instance();
+    QObject::connect(signalHandler, &SignalHandler::signalReceived, &a, [&a](int sig) {
+        if (sig != SIGTERM)
+            return;
+        qCInfo(logAppDialogWayland) << "main: SIGTERM received, quitting main event loop";
+        a.quit();
+    });
+    signalHandler->watchSignal(SIGTERM);
 
     DPF_NAMESPACE::backtrace::installStackTraceHandler();
 
     if (!pluginsLoad()) {
-        qCCritical(logAppDialogWayland) << "Load pugin failed!";
-        abort();
+        qCCritical(logAppDialogWayland) << "main: Failed to load plugins, terminating application";
+        Q_ASSERT_X(false, "pluginsLoad", "Failed to load plugins");
     }
 
+    qCInfo(logAppDialogWayland) << "main: Application initialization completed successfully";
     int ret { a.exec() };
-    DPF_NAMESPACE::LifeCycle::shutdownPlugins();
-    if (qApp->property("SIGTERM").toBool()) {
-        qWarning() << "Exit app by SIGTERM, reuturn: " << ret;
-        _Exit(ret);
-    }
 
+    qCInfo(logAppDialogWayland) << "main: Shutting down plugins";
+    DPF_NAMESPACE::LifeCycle::shutdownPlugins();
+
+    qCInfo(logAppDialogWayland) << "main: Application exiting normally with code:" << ret;
     return ret;
 }

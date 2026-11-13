@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,7 +7,6 @@
 #include <QSharedPointer>
 
 namespace dfmbase {
-Q_GLOBAL_STATIC(WatcherCache, _watcherCacheManager)
 
 /*!
  * \class DFMWatcherCachesManager
@@ -40,6 +39,7 @@ WatcherCache::~WatcherCache()
  */
 WatcherCache &WatcherCache::instance()
 {
+    static WatcherCache *_watcherCacheManager = new WatcherCache;
     return *_watcherCacheManager;
 }
 /*!
@@ -56,7 +56,7 @@ WatcherCache &WatcherCache::instance()
 QSharedPointer<AbstractFileWatcher> WatcherCache::getCacheWatcher(const QUrl &url)
 {
     Q_D(WatcherCache);
-
+    emit updateWatcherTime({ url }, true);
     return d->watchers.value(url);
 }
 /*!
@@ -75,8 +75,11 @@ QSharedPointer<AbstractFileWatcher> WatcherCache::getCacheWatcher(const QUrl &ur
 void WatcherCache::cacheWatcher(const QUrl &url, const QSharedPointer<AbstractFileWatcher> &watcher)
 {
     Q_D(WatcherCache);
+    if (watcher.isNull())
+        return;
     connect(watcher.data(), &AbstractFileWatcher::fileDeleted, this, &WatcherCache::fileDelete);
     d->watchers.insert(url, watcher);
+    emit updateWatcherTime({ url }, true);
 }
 /*!
  * \brief removCacheWatcher 根据Url移除当前缓存的watcher
@@ -91,11 +94,13 @@ void WatcherCache::cacheWatcher(const QUrl &url, const QSharedPointer<AbstractFi
  *
  * \return void
  */
-void WatcherCache::removeCacheWatcher(const QUrl &url)
+void WatcherCache::removeCacheWatcher(const QUrl &url, const bool isEmit)
 {
     Q_D(WatcherCache);
     emit fileDelete(url);
     d->watchers.remove(url);
+    if (isEmit)
+        emit updateWatcherTime({ url }, false);
 }
 
 void WatcherCache::removeCacheWatcherByParent(const QUrl &parent)
@@ -104,25 +109,28 @@ void WatcherCache::removeCacheWatcherByParent(const QUrl &parent)
         return;
 
     Q_D(WatcherCache);
-    auto keys = d->watchers.keys();
-    for (const auto &url : keys) {
-        if (url.scheme() == parent.scheme() && url.path().startsWith(parent.path()))
-            d->watchers.remove(url);
+
+    auto removedUrls = d->watchers.removeIf([&](const QUrl &url, const QSharedPointer<AbstractFileWatcher> & /*watcher*/) {
+        return url.scheme() == parent.scheme() && url.path().startsWith(parent.path());
+    });
+
+    if (!removedUrls.isEmpty()) {
+        emit updateWatcherTime(removedUrls, false);
     }
 }
 
 bool WatcherCache::cacheDisable(const QString &scheme)
 {
-    return d->disableCahceSchemes.contains(scheme);
+    return d->disableCahceSchemes.containsByLock(scheme);
 }
 
 void WatcherCache::setCacheDisbale(const QString &scheme, bool disbale)
 {
-    if (!d->disableCahceSchemes.contains(scheme) && disbale) {
+    if (!d->disableCahceSchemes.containsByLock(scheme) && disbale) {
         d->disableCahceSchemes.push_backByLock(scheme);
         return;
     }
-    if (d->disableCahceSchemes.contains(scheme) && !disbale) {
+    if (d->disableCahceSchemes.containsByLock(scheme) && !disbale) {
         d->disableCahceSchemes.removeOneByLock(scheme);
         return;
     }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,7 +7,7 @@
 #include "utils/opticalhelper.h"
 #include "mastered/masteredmediafileinfo.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_menu_defines.h>
 #include <dfm-base/base/schemefactory.h>
@@ -54,7 +54,9 @@ bool OpticalMenuScene::initialize(const QVariantHash &params)
         d->isBlankDisc = true;
 
     if (!d->initializeParamsIsValid()) {
-        fmWarning() << "menu scene:" << name() << " init failed." << d->selectFiles.isEmpty() << d->focusFile << d->currentDir;
+        fmWarning() << "Menu scene initialization failed - invalid parameters:" << name()
+                    << "selectFiles empty:" << d->selectFiles.isEmpty()
+                    << "focusFile:" << d->focusFile << "currentDir:" << d->currentDir;
         return false;
     }
 
@@ -89,11 +91,14 @@ void OpticalMenuScene::updateState(QMenu *parent)
         "stage-file-to-burning",
         "set-as-wallpaper",
         "mount-image",
+        "tag-color-list",
+        "tag-add"
         ""   // for oem
     };
     static const QStringList whiteEmptyActIdList {
         "display-as",
         "sort-by",
+        "group-by",
         "open-as-administrator",
         "open-in-terminal",
         "paste",
@@ -104,7 +109,8 @@ void OpticalMenuScene::updateState(QMenu *parent)
     };
     static const QStringList whiteSceneList { "NewCreateMenu", "ClipBoardMenu", "OpenDirMenu", "FileOperatorMenu",
                                               "OpenWithMenu", "ShareMenu", "SortAndDisplayMenu", "PropertyMenu",
-                                              "BookmarkMenu", "SendToMenu", "SendToDiscMenu", "OemMenu", "WorkspaceMenu" };
+                                              "BookmarkMenu", "SendToMenu", "SendToDiscMenu", "OemMenu", "WorkspaceMenu",
+                                              "TagMenu" };
 
     auto actions = parent->actions();
     std::for_each(actions.begin(), actions.end(), [this](QAction *act) {
@@ -170,13 +176,17 @@ QString OpticalMenuScenePrivate::findSceneName(QAction *act) const
 
 bool OpticalMenuScenePrivate::enablePaste() const
 {
-    if (!OpticalHelper::isBurnEnabled())
+    if (!OpticalHelper::isBurnEnabled()) {
+        fmDebug() << "Paste disabled - burn functionality not enabled";
         return false;
+    }
 
     const QString &dev { OpticalHelper::burnDestDevice(currentDir) };
     const QUrl &rootUrl { OpticalHelper::discRoot(dev) };
-    if (!UniversalUtils::urlEquals(rootUrl, currentDir))
+    if (!UniversalUtils::urlEquals(rootUrl, currentDir)) {
+        fmDebug() << "Paste disabled - current dir is not disc root, root:" << rootUrl << "current:" << currentDir;
         return false;
+    }
 
     auto &&clipboard { ClipBoard::instance() };
     return clipboard->clipboardAction() != ClipBoard::kUnknownAction

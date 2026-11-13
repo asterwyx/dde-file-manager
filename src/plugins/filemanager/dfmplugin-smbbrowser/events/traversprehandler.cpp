@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,54 +22,88 @@
 #include <QDBusInterface>
 #include <QNetworkInterface>
 
+#include <unistd.h>
+
 DPSMBBROWSER_USE_NAMESPACE
 DFMBASE_USE_NAMESPACE
 
 void travers_prehandler::networkAccessPrehandler(quint64 winId, const QUrl &url, std::function<void()> after)
 {
     const auto &&scheme = url.scheme();
-    static const QStringList &kSupportedSchemes { Global::Scheme::kSmb, Global::Scheme::kFtp, Global::Scheme::kSFtp };
-    if (!kSupportedSchemes.contains(scheme))
+    static const QStringList &kSupportedSchemes { Global::Scheme::kSmb,
+                                                  Global::Scheme::kFtp,
+                                                  Global::Scheme::kSFtp,
+                                                  Global::Scheme::kNfs,
+                                                  Global::Scheme::kDav,
+                                                  Global::Scheme::kDavs };
+    if (!kSupportedSchemes.contains(scheme)) {
+        fmDebug() << "Scheme not supported for network access:" << scheme;
         return;
+    }
+
+    QUrl netUrl = url;
+    if (url.hasFragment()) {
+        netUrl = url.adjusted(QUrl::RemoveFragment);
+        // '#' 标识片段起始，后面的内容被分配到了fragment字段中。
+        // 当 '#' 紧跟 host（如 smb://1.2.3.4#share/）时 url.path() 为空，
+        // 此时需补前导 '/'，否则 QUrl::setPath 会生成无效 URL（toString 返回空串）。
+        auto path = url.path();
+        if (path.isEmpty())
+            path = "/";
+        path = path + '#' + url.fragment(QUrl::FullyDecoded);
+        netUrl.setPath(path);
+        fmInfo() << "networkAccessPrehandler: converted fragment into path."
+                 << "oldUrl: " << url
+                 << "newUrl" << netUrl;
+    }
 
     // the mounted source must be the TOP dir.
     // if smb://1.2.3.4/top/subdir is passed in, the param passed to mount function must be smb://1.2.3.4/top
     // and only deal smb scheme now.
-    QString mountSource = url.toString();
+    QString mountSource = netUrl.toString();
     QString subPath;
     bool isSmb = false;
     if (scheme == Global::Scheme::kSmb) {
-        mountSource = prehandler_utils::splitMountSource(url.toString(), &subPath);
+        mountSource = prehandler_utils::splitMountSource(QUrl::fromPercentEncoding(netUrl.toString().toUtf8()), &subPath);
         isSmb = true;
     }
 
     // fix 237183
     QString origUrl;
-    auto host = url.host();
+    auto host = netUrl.host();
     if (host.contains("xn--")) {   // xn--0zwm56d (测试)
         int dotAppended = 0;
         if (!host.endsWith("."))
             host += ".", dotAppended = 1;   // without this dot, cannot decoded by punycode. qurlidna.cpp::qt_ACE_do()
         QUrl u = QUrl::fromUserInput(host);   // 'http://' is auto prepended. (http://xn--0zwm56d.)
         auto punyDecodedHost = u.host().chopped(dotAppended);
-        origUrl = url.toString().replace(url.host(), punyDecodedHost);   // got the original url (smb://测试/)
+        origUrl = netUrl.toString().replace(netUrl.host(), punyDecodedHost);   // got the original url (smb://测试/)
     }
 
-    auto onMountFailed = [url, origUrl](const dfmmount::OperationErrorInfo &err) {
+    auto onMountFailed = [netUrl, origUrl](const dfmmount::OperationErrorInfo &err) {
+        fmCritical() << "Mount operation failed for URL:" << netUrl.toString()
+                     << "error code:" << err.code << "error message:" << err.message;
+
         DialogManager::instance()->showErrorDialogWhenOperateDeviceFailed(DialogManager::kMount, err);
         // remove from history when mount failed.
-        dpfSlotChannel->push("dfmplugin_titlebar", "slot_ServerDialog_RemoveHistory", url.toString());
-        if (!origUrl.isEmpty())
+        dpfSlotChannel->push("dfmplugin_titlebar", "slot_ServerDialog_RemoveHistory", netUrl.toString().toUtf8());
+        if (!origUrl.isEmpty()) {
             dpfSlotChannel->push("dfmplugin_titlebar", "slot_ServerDialog_RemoveHistory", origUrl);
+            fmDebug() << "Removed both original and decoded URLs from history";
+        }
     };
 
+    static QString kRecordFilePath = QString("/tmp/dfm_smb_mount_%1.ini").arg(getuid());
+    static QString kRecordGroup = "defaultSmbPath";
+    static QRegularExpression kRegx { "/|\\.|:" };
     DevMngIns->mountNetworkDeviceAsync(mountSource, [=](bool ok, const DFMMOUNT::OperationErrorInfo &err, const QString &mpt) {
-        fmInfo() << "mount done: " << url << ok << err.code << err.message << mpt;
         if (!mpt.isEmpty()) {
-            doChangeCurrentUrl(winId, mpt, subPath, url);
+            doChangeCurrentUrl(winId, mpt, subPath, netUrl);
         } else if (ok || err.code == DFMMOUNT::DeviceError::kGIOErrorAlreadyMounted) {
             if (isSmb) onSmbRootMounted(mountSource, after);
         } else {
+            fmWarning() << "mount done: " << netUrl << ok << err.code << err.message << mpt;
+            QApplication::restoreOverrideCursor();
             onMountFailed(err);
         }
     });
@@ -92,6 +126,8 @@ void travers_prehandler::smbAccessPrehandler(quint64 winId, const QUrl &url, std
             dpfSlotChannel->push("dfmplugin_titlebar", "slot_Navigator_Backward", winId);   // if failed/cancelled, back to previous page.
             return;
         }
+    } else {
+        fmDebug() << "Target host is not local, skipping service validation:" << targetHost;
     }
 
     QTimer::singleShot(100, qApp, [=] { networkAccessPrehandler(winId, url, after); });
@@ -121,9 +157,14 @@ void travers_prehandler::doChangeCurrentUrl(quint64 winId, const QString &mpt, c
     targetPath.append(subPath);
 
     QUrl url = QUrl::fromLocalFile(targetPath);
-    FileInfoPointer fileInfo = InfoFactory::create<FileInfo>(url);
-    if (fileInfo && fileInfo->isAttributes(FileInfo::FileIsType::kIsFile))
-        url = fileInfo->urlOf(FileInfo::FileUrlInfoType::kParentUrl);
+    FileInfoPointer fileInfo = InfoFactory::create<FileInfo>(url, Global::kCreateFileInfoSync);
+    if (fileInfo && fileInfo->isAttributes(FileInfo::FileIsType::kIsFile)) {
+        dpfSignalDispatcher->publish(GlobalEventType::kOpenFiles, winId, QList<QUrl> { url });
+
+        QUrl parentUrl = fileInfo->urlOf(UrlInfoType::kParentUrl);
+        parentUrl.setQuery("selectUrl=" + url.toString());
+        url = parentUrl;
+    }
     dpfSignalDispatcher->publish(GlobalEventType::kChangeCurrentUrl, winId, url);
 
     // remove sourceUrl from history stack.
@@ -135,13 +176,20 @@ void travers_prehandler::onSmbRootMounted(const QString &mountSource, Handler af
     if (after)
         after();
 
-    if (!ProtocolDeviceDisplayManager::instance()->isShowOfflineItem())
+    if (!ProtocolDeviceDisplayManager::instance()->isShowOfflineItem()) {
+        fmDebug() << "Show offline items is disabled, skipping virtual entry processing";
         return;
-    if (ProtocolDeviceDisplayManager::instance()->displayMode() != SmbDisplayMode::kAggregation)
-        return;
+    }
 
-    if (QUrl(mountSource).host().isEmpty())
+    if (ProtocolDeviceDisplayManager::instance()->displayMode() != SmbDisplayMode::kAggregation) {
+        fmDebug() << "Display mode is not aggregation, skipping virtual entry processing";
         return;
+    }
+
+    if (QUrl(mountSource).host().isEmpty()) {
+        fmWarning() << "Mount source has empty host, cannot process virtual entry:" << mountSource;
+        return;
+    }
 
     fmDebug() << "do cache root entry" << mountSource;
     VirtualEntryDbHandler::instance()->saveData(VirtualEntryData(mountSource));

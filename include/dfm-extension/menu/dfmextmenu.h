@@ -1,6 +1,6 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LGPL-3.0-or-later
 
 #ifndef DFMEXTMENU_H
 #define DFMEXTMENU_H
@@ -38,6 +38,8 @@ public:
 
     DFMExtAction *menuAction() const;
     std::list<DFMExtAction *> actions() const;
+    // since 6.6.4
+    DFMExtAction *findActionById(const std::string &actionId) const;
 
     DFM_FAKE_VIRTUAL void triggered(DFMExtAction *action);
     DFM_FAKE_VIRTUAL void hovered(DFMExtAction *action);

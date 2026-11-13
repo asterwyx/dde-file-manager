@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -31,6 +31,9 @@ public:
     virtual const FileInfoPointer fileInfo() const override;
     virtual QUrl url() const override;
     virtual void close() override;
+    virtual QList<QSharedPointer<SortFileInfo>> sortFileInfoList() override;
+    virtual bool oneByOne() override { return false; }
+    virtual bool isWaitingForUpdates() const override;
 
 signals:
     void sigSearch() const;
@@ -38,6 +41,7 @@ signals:
 
 private:
     SearchDirIteratorPrivate *const d { nullptr };
+    void doCompleteSortInfo(SortInfoPointer sortInfo);
 };
 
 }

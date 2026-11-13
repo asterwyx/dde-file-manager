@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,9 +27,10 @@ CustomSettingItemRegister *CustomSettingItemRegister::instance()
 bool CustomSettingItemRegister::registCustomSettingItemType(const QString &type, const CustomSettingItemCreator &creator)
 {
     if (creators.contains(type)) {
-        qCWarning(logDFMBase) << type << "is already registered...";
+        qCWarning(logDFMBase) << "Custom setting item type already registered:" << type;
         return false;
     }
     creators.insert(type, creator);
+    qCDebug(logDFMBase) << "Custom setting item type registered successfully:" << type;
     return true;
 }

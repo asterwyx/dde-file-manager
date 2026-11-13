@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,8 +11,10 @@
 #include <QStandardPaths>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QDebug>
 #include <QFile>
+#include <QSaveFile>
 #include <QDir>
 #include <QTimer>
 #include <QThread>
@@ -29,8 +31,9 @@ public:
     explicit SettingsPrivate(Settings *qq);
 
     bool autoSync = false;   // automatically synchronize
-    bool watchChanges = false;   //monitor for configuration changes
+    bool watchChanges = false;   // monitor for configuration changes
     bool settingFileIsDirty = false;   // set whether the file has cached data (dirty data)
+    bool readOnly = false;   // read-only mode, sync() will not write to file
     QSet<QString> autoSyncGroupExclude;   // when auto sync, exclude some group
     QTimer *syncTimer = nullptr;   // synchronization Timer
     QString fallbackFile;   // backup settings file path
@@ -145,7 +148,7 @@ public:
      */
     QString urlToKey(const QUrl &url) const
     {
-        if (dfmbase::FileUtils::isLocalFile(url)) {
+        if (url.isLocalFile()) {
             const QUrl &new_url = StandardPaths::toStandardUrl(url.toLocalFile());
 
             if (new_url.isValid()) {
@@ -155,8 +158,25 @@ public:
 
         return url.toString();
     }
+    /*!
+     * \brief normalizeValue Normalize QVariant to JSON-compatible type for comparison
+     *
+     * When values are serialized to JSON and read back, their types may change
+     * (e.g., QUrl becomes QString). This function converts values to the same
+     * type that would result from JSON round-trip, enabling correct comparison.
+     *
+     * \param value The value to normalize
+     * \return QVariant with JSON-compatible type
+     */
+    static QVariant normalizeValue(const QVariant &value)
+    {
+        // QJsonValue::fromVariant handles type conversion consistently
+        return QJsonValue::fromVariant(value).toVariant();
+    }
 
     void _q_onFileChanged(const QUrl &url);
+    void _q_onFileRenamed(const QUrl &fromUrl, const QUrl &toUrl);
+    void restartWatcher();
 };
 
 SettingsPrivate::SettingsPrivate(Settings *qq)
@@ -311,6 +331,41 @@ void SettingsPrivate::_q_onFileChanged(const QUrl &url)
             }
         }
     }
+}
+/*!
+ * \brief SettingsPrivate::_q_onFileRenamed Handle file rename events (e.g., from QSaveFile)
+ *
+ * When QSaveFile commits, it renames a temp file to the target file,
+ * which changes the inode and invalidates file watchers. This handler
+ * reloads the configuration data and restarts the watcher.
+ *
+ * \param fromUrl The source URL (temp file)
+ * \param toUrl The target URL (settings file)
+ */
+void SettingsPrivate::_q_onFileRenamed(const QUrl &fromUrl, const QUrl &toUrl)
+{
+    Q_UNUSED(fromUrl)
+
+    if (toUrl.toLocalFile() != settingFile)
+        return;
+
+    // Reload configuration data from the new file (written by another process or this process)
+    _q_onFileChanged(toUrl);
+    restartWatcher();
+}
+/*!
+ * \brief SettingsPrivate::restartWatcher Restart file watcher to monitor the current file
+ *
+ * This is necessary when the file inode changes (e.g., after QSaveFile commit)
+ */
+void SettingsPrivate::restartWatcher()
+{
+    if (!watchChanges || !settingWatcher) {
+        return;
+    }
+
+    settingWatcher->stopWatcher();
+    settingWatcher->startWatcher();
 }
 
 /*!
@@ -557,6 +612,7 @@ QUrl Settings::toUrlValue(const QVariant &url)
 
     return QUrl::fromUserInput(urlString);
 }
+
 /*!
  * \brief Settings::value 获取某个组的某个key对应的value，配置的某个属性
  *
@@ -570,15 +626,15 @@ QUrl Settings::toUrlValue(const QVariant &url)
  */
 QVariant Settings::value(const QString &group, const QString &key, const QVariant &defaultValue) const
 {
-    QVariant value = d->writableData.values.value(group).value(key, QVariant::Invalid);
+    QVariant value = d->writableData.values.value(group).value(key);
 
-    if (value.isValid()) {
+    if (!value.isNull()) {
         return value;
     }
 
-    value = d->fallbackData.values.value(group).value(key, QVariant::Invalid);
+    value = d->fallbackData.values.value(group).value(key);
 
-    if (value.isValid()) {
+    if (!value.isNull()) {
         return value;
     }
 
@@ -639,6 +695,7 @@ QUrl Settings::urlValue(const QString &group, const QUrl &key, const QUrl &defau
 {
     return urlValue(group, d->urlToKey(key), defaultValue);
 }
+
 /*!
  * \brief Settings::setValue 设置属性
  *
@@ -682,17 +739,21 @@ bool Settings::setValueNoNotify(const QString &group, const QString &key, const 
 {
     bool changed = false;
 
+    // Normalize value for comparison to handle type differences after JSON round-trip
+    // (e.g., QUrl stored as QString in JSON)
+    const QVariant normalizedValue = SettingsPrivate::normalizeValue(value);
+
     if (isRemovable(group, key)) {
-        if (d->writableData.value(group, key) == value) {
+        if (d->writableData.value(group, key) == normalizedValue) {
             return false;
         }
 
         changed = true;
     } else {
-        changed = this->value(group, key, value) != value;
+        changed = SettingsPrivate::normalizeValue(this->value(group, key, QVariant())) != normalizedValue;
     }
 
-    d->writableData.setValue(group, key, value);
+    d->writableData.setValue(group, key, normalizedValue);
     d->makeSettingFileToDirty(true);
 
     return changed;
@@ -851,22 +912,37 @@ bool Settings::sync()
         return true;
     }
 
+    // read-only mode: clear dirty flag without writing
+    if (d->readOnly) {
+        d->makeSettingFileToDirty(false);
+        return true;
+    }
+
     const QByteArray &json = d->toJson(d->writableData);
 
-    QFile file(d->settingFile);
+    // Use QSaveFile for atomic write to prevent data corruption
+    // on crash, power failure, or disk full conditions
+    QSaveFile file(d->settingFile);
 
-    if (!file.open(QFile::WriteOnly)) {
+    if (!file.open(QIODevice::WriteOnly)) {
+        qCWarning(logDFMBase) << "Failed to open settings file for writing:"
+                              << d->settingFile << file.errorString();
         return false;
     }
 
-    bool ok = file.write(json) == json.size();
-
-    if (ok) {
-        d->makeSettingFileToDirty(false);
+    if (file.write(json) != json.size()) {
+        qCWarning(logDFMBase) << "Failed to write settings data:" << file.errorString();
+        file.cancelWriting();
+        return false;
     }
-    file.close();
 
-    return ok;
+    if (!file.commit()) {
+        qCWarning(logDFMBase) << "Failed to commit settings file:" << file.errorString();
+        return false;
+    }
+
+    d->makeSettingFileToDirty(false);
+    return true;
 }
 /*!
  * \brief Settings::autoSync 自动将属性写入配置文件
@@ -893,6 +969,11 @@ void Settings::autoSyncExclude(const QString &group, bool sync /*= false*/)
         d->autoSyncGroupExclude.insert(group);
     else
         d->autoSyncGroupExclude.remove(group);
+}
+
+bool Settings::isReadOnly() const
+{
+    return d->readOnly;
 }
 /*!
  * \brief Settings::setAutoSync 设置是否自动写配置文件
@@ -963,10 +1044,34 @@ void Settings::setWatchChanges(bool watchChanges)
 
         d->settingWatcher->moveToThread(thread());
         connect(d->settingWatcher.get(), &AbstractFileWatcher::fileAttributeChanged, this, &Settings::onFileChanged);
+        connect(d->settingWatcher.get(), &AbstractFileWatcher::fileRename, this,
+                [this](const QUrl &from, const QUrl &to) {
+                    d->_q_onFileRenamed(from, to);
+                });
 
         d->settingWatcher->startWatcher();
     } else if (d->settingWatcher) {
         d->settingWatcher.reset();
+    }
+}
+
+/*!
+ * \brief Settings::setReadOnly 设置是否为只读模式
+ *
+ * 只读模式下，sync() 方法不会将配置写入文件
+ *
+ * \param readOnly 是否为只读模式
+ */
+void Settings::setReadOnly(bool readOnly)
+{
+    if (d->readOnly == readOnly)
+        return;
+
+    d->readOnly = readOnly;
+
+    // clear dirty flag when entering read-only mode
+    if (readOnly && d->settingFileIsDirty) {
+        d->makeSettingFileToDirty(false);
     }
 }
 

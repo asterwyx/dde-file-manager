@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,8 +17,7 @@ using namespace dfmplugin_tag;
 DWIDGET_USE_NAMESPACE
 
 TagColorListWidget::TagColorListWidget(QWidget *parent, UseType type)
-    : QFrame(parent)
-    , useType(type)
+    : QFrame(parent), useType(type)
 {
     setObjectName("tagActionWidget");
     setFocusPolicy(Qt::StrongFocus);
@@ -75,14 +74,14 @@ void TagColorListWidget::clearToolTipText()
 
 void TagColorListWidget::initUiElement()
 {
-    QList<QColor> colors = TagHelper::instance()->defualtColors();
+    QList<QColor> colors = TagHelper::instance()->defaultColors();
 
     for (const QColor &color : colors) {
         tagButtons << new TagButton(color, this);
     }
 
     buttonLayout = new QHBoxLayout;
-    buttonLayout->setMargin(0);
+    buttonLayout->setContentsMargins(0, 0, 0, 0);
     buttonLayout->setSpacing(0);
 
     if (useType == kAction)
@@ -110,6 +109,7 @@ void TagColorListWidget::initUiElement()
     mainLayout->addLayout(buttonLayout);
 
     toolTip = new DLabel(this);
+    toolTip->setAccessibleName("ToolTip");
     toolTip->setText(QStringLiteral(" "));
     toolTip->setStyleSheet("color: #707070; font-size: 10px");
     toolTip->setObjectName("tool_tip");

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,11 +9,14 @@
 
 #include <QObject>
 #include <QSharedPointer>
-#include <QVariant>
+#include <QList>
+#include <QUrl>
 #include <QMutex>
 
+class QWidget;
+
 typedef QSharedPointer<QMap<quint8, QVariant>> JobInfoPointer;
-Q_DECLARE_METATYPE(JobInfoPointer);
+// Q_DECLARE_METATYPE(JobInfoPointer);
 
 namespace dfmbase {
 class AbstractJobHandler : public QObject
@@ -31,10 +34,11 @@ public:
         kCopyIntegrityChecking = 0x40,   // 复制文件时进行完整性校验
         kDeleteForceDeleteFile = 0x80,   // 强制删除文件夹(去除文件夹的只读权限)
         kDontFormatFileName = 0x100,   // 拷贝时不处理文件名称
-        kRevocation = 0x200,   // 拷贝时不处理文件名称
+        kRevocation = 0x200,   // 撤销操作
         kCopyRemote = 0x400,   // 深信服远程拷贝
         kRedo = 0x800,   // 重新执行（ctrl + Y）
-        kCountProgressCustomize = 0x800,   // 强制使用自己统计进度
+        kCountProgressCustomize = 0x1000,   // 强制使用自己统计进度
+        kRevocationFiles = 0x2000   // 撤销多文件操作
     };
     Q_ENUM(JobFlag)
     Q_DECLARE_FLAGS(JobFlags, JobFlag)
@@ -90,8 +94,9 @@ public:
         kFailedParseUrlOfTrash = 34,   // 解析trash的url失败 Failed to parse the url of trash
         kFailedObtainTrashOriginalFile = 35,   // 获取trash中原文件失败 Failed to obtain the trash original file
         kFileMoveToTrashError = 36,   // 文件移动到回收站错误
-        kRetryReadOrWriteFailed = 37, // 重试失败
-        kCanNotAccessFile = 38, // 无法访问远程文件
+        kRetryReadOrWriteFailed = 37,   // 重试失败
+        kCanNotAccessFile = 38,   // 无法访问远程文件
+        kFileMoveToTrashNoSpace = 39,   // 文件移动到回收站存储器空间不足
         kUnknowError = 255,   // 未知错误
     };
     Q_ENUM(JobErrorType)
@@ -99,7 +104,7 @@ public:
         kCopyType = 0,   // 拷贝任务
         kCutType = 1,   // 剪切任务
         kDeleteType = 2,   // 删除任务
-        kMoveToTrashType = 3,   //移动到回收站
+        kMoveToTrashType = 3,   // 移动到回收站
         kRestoreType = 4,   // 从回收站还原
         kCleanTrashType = 5,   // 清理回收站
         kUnknow = 255,
@@ -119,6 +124,7 @@ public:
         kStopAction = 0x200,   // 停止操作
         kStartAction = 0x400,   // 开始操作
         kResumAction = 0x800,   // 恢复
+        kPermanentlyDelete = 0x1000,   // 强制删除
     };
     Q_ENUM(SupportAction)
     Q_DECLARE_FLAGS(SupportActions, SupportAction)
@@ -245,9 +251,11 @@ Q_SIGNALS:   // 发送给任务调用者使用的信号
      */
     void speedUpdatedNotify(const JobInfoPointer jobInfo);
     void requestShowTipsDialog(DFMBASE_NAMESPACE::AbstractJobHandler::ShowDialogType type, const QList<QUrl> list);
+    void requestShowFailedDialog(const QMap<QUrl, QString> &failedInfo);
     void workerFinish();
     void requestRemoveTaskWidget();
     void requestSaveRedoOperation(const QString &token, const qint64 deleteFirstFileSize);
+    void requestTaskDailog();
 Q_SIGNALS:   // 发送给任务使用的信号
     /*!
      * \brief userAction 用户当前动作
@@ -280,10 +288,11 @@ private:
 }   // namespace dfmbase
 
 Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::SupportActions)
+Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::JobFlag)
 Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::JobFlags)
 Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::ShowDialogType)
-Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::OperatorCallback);
-Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::OperatorHandleCallback);
+// Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::OperatorCallback);
+// Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AbstractJobHandler::OperatorHandleCallback);
 using JobHandlePointer = QSharedPointer<DFMBASE_NAMESPACE::AbstractJobHandler>;
 Q_DECLARE_METATYPE(JobHandlePointer)
 

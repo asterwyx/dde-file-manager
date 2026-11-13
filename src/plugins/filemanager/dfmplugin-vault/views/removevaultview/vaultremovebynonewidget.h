@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,8 +6,6 @@
 #define VAULTREMOVEBYNONEWIDGET_H
 
 #include "dfmplugin_vault_global.h"
-
-#include <polkit-qt5-1/PolkitQt1/Authority>
 
 #include <QWidget>
 
@@ -28,7 +26,7 @@ Q_SIGNALS:
     void closeDialog();
 
 public Q_SLOTS:
-    void slotCheckAuthorizationFinished(PolkitQt1::Authority::Result result);
+    void slotCheckAuthorizationFinished(bool result);
 
 private:
     void initUI();

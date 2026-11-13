@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,16 +7,11 @@
 
 #include "ddplugin_wallpapersetting_global.h"
 #include "backgroundpreview.h"
+#include "dbus/appearance_interface.h"
 
 #include <dfm-base/interfaces/screen/abstractscreen.h>
 
-#ifdef COMPILE_ON_V23
-#    include "dbus/appearance_interface.h"
 using BackgroudInter = org::deepin::dde::Appearance1;
-#else
-#    include <com_deepin_wm.h>
-using BackgroudInter = com::deepin::wm;
-#endif
 
 #include <QObject>
 #include <QMap>

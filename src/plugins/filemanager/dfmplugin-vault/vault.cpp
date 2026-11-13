@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,7 +22,7 @@ Q_DECLARE_METATYPE(Qt::DropAction *)
 
 DFMBASE_USE_NAMESPACE
 namespace dfmplugin_vault {
-DFM_LOG_REISGER_CATEGORY(DPVAULT_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPVAULT_NAMESPACE)
 
 void Vault::initialize()
 {

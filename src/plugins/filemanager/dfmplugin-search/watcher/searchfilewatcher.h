@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -28,7 +28,14 @@ private:
     void onFileDeleted(const QUrl &url);
     void onFileAttributeChanged(const QUrl &url);
     void onFileRenamed(const QUrl &fromUrl, const QUrl &toUrl);
+    void onFileAdd(const QUrl &url);
 
+private Q_SLOTS:
+    void handleFileAdd(const QUrl &url);
+    void handleFileDelete(const QList<QUrl> &urls);
+    void handleFileRename(const QUrl &oldUrl, const QUrl &newUrl);
+
+private:
     SearchFileWatcherPrivate *dptr;
 };
 

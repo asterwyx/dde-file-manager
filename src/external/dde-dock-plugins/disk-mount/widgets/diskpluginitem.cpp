@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -43,7 +43,7 @@ void DiskPluginItem::updateIcon()
 {
     QString &&iconName = "drive-removable-dock-symbolic";
 
-#if defined(COMPILE_ON_V23) || defined(USE_DOCK_NEW_INTERFACE)
+#if defined(USE_DOCK_NEW_INTERFACE)
     if (DGuiApplicationHelper::instance()->themeType() == DGuiApplicationHelper::LightType)
         iconName.append(PLUGIN_MIN_ICON_NAME);
 #else
@@ -90,9 +90,4 @@ void DiskPluginItem::resizeEvent(QResizeEvent *e)
     }
 
     updateIcon();
-}
-
-QSize DiskPluginItem::sizeHint() const
-{
-    return QSize(26, 26);
 }

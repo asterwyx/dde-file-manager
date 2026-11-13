@@ -1,18 +1,43 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "dockutils.h"
 #include "global_server_defines.h"
 
-#include <QStringListIterator>
-#include <QRegularExpression>
-#include <QIcon>
+#include <DConfig>
+
 #include <QLoggingCategory>
+#include <QStringList>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QStandardPaths>
+#include <QFileInfo>
+#include <QDir>
+#include <QUrl>
+#include <QIcon>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonValue>
 
 #include <libmount/libmount.h>
 
 Q_LOGGING_CATEGORY(logAppDock, "org.deepin.dde.dock.plugin.disk-mount")
+DCORE_USE_NAMESPACE
+
+bool common_utils::isIntegratedByFilemanager()
+{
+    std::unique_ptr<DConfig> cfg {
+        DConfig::create("org.deepin.dde.dock", "org.deepin.dde.dock.plugin.diskmount", "")
+    };
+    if (!cfg || !cfg->isValid()) {
+        qCWarning(logAppDock) << "Failed to create or validate DConfig, using default integration";
+        return true;
+    }
+
+    return cfg->value("filemanager-integration").toBool();
+}
 
 QString size_format::formatDiskSize(const quint64 num)
 {
@@ -60,8 +85,10 @@ bool smb_utils::parseSmbInfo(const QString &smbPath, QString *host, QString *sha
     Q_ASSERT(host && share && port);
     static const QRegularExpression regx(R"(([:,]port=(?<port>\d*))?[,:]server=(?<host>[^/:,]+)(,share=(?<share>[^/:,]+))?)");
     auto match = regx.match(smbPath);
-    if (!match.hasMatch())
+    if (!match.hasMatch()) {
+        qCWarning(logAppDock) << "Failed to parse SMB info from path:" << smbPath;
         return false;
+    }
 
     *host = match.captured("host");
     *share = match.captured("share");
@@ -73,8 +100,11 @@ bool smb_utils::parseSmbInfo(const QString &smbPath, QString *host, QString *sha
 QString device_utils::blockDeviceName(const QVariantMap &data)
 {
     QString idLabel = data.value(GlobalServerDefines::DeviceProperty::kIdLabel).toString();
-    if (!idLabel.isEmpty())
+    if (!idLabel.isEmpty()) {
+        qCDebug(logAppDock) << "Using ID label as device name:" << idLabel;
         return idLabel;
+    }
+
     quint64 size = data.value(GlobalServerDefines::DeviceProperty::kSizeTotal).toULongLong();
     return QObject::tr("%1 Volume").arg(size_format::formatDiskSize(size));
 }
@@ -84,8 +114,11 @@ QString device_utils::protocolDeviceName(const QVariantMap &data)
     QString devName = data.value(GlobalServerDefines::DeviceProperty::kDisplayName).toString();
     QString host, share;
     int port;
-    if (smb_utils::parseSmbInfo(devName, &host, &share, &port))
+    if (smb_utils::parseSmbInfo(devName, &host, &share, &port)) {
         devName = QObject::tr("%1 on %2").arg(share).arg(host);
+        qCDebug(logAppDock) << "Updated SMB device name:" << devName;
+    }
+
     return devName;
 }
 
@@ -151,7 +184,7 @@ bool device_utils::isDlnfsMount(const QString &mpt)
 
     int ret = mnt_table_parse_mtab(tab, nullptr);
     if (ret != 0) {
-        qCWarning(logAppDock) << "device: cannot parse mtab" << ret;
+        qCWarning(logAppDock) << "Failed to parse mtab for DLNFS check, error code:" << ret;
         mnt_free_table(tab);
         mnt_free_iter(iter);
         return false;
@@ -190,7 +223,7 @@ QString device_utils::queryDevice(const QString &mpt)
 
     int ret = mnt_table_parse_mtab(tab, nullptr);
     if (ret != 0) {
-        qCWarning(logAppDock) << "device: cannot parse mtab" << ret;
+        qCWarning(logAppDock) << "Failed to parse mtab for device query, error code:" << ret << "mount point:" << _mpt;
         mnt_free_table(tab);
         mnt_free_iter(iter);
         return "";
@@ -208,5 +241,54 @@ QString device_utils::queryDevice(const QString &mpt)
 
     mnt_free_table(tab);
     mnt_free_iter(iter);
+    return "";
+}
+
+QString device_utils::protocolDeviceAlias(const QString &scheme, const QString &host)
+{
+    if (scheme.isEmpty() || host.isEmpty()) {
+        qCDebug(logAppDock) << "Invalid protocol URL - missing scheme or host:" << scheme << host;
+        return "";
+    }
+
+    static QString cfgPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+            + "/deepin/dde-file-manager.json";
+
+    QFile file(cfgPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qCDebug(logAppDock) << "Failed to open config file:" << cfgPath;
+        return "";
+    }
+
+    QJsonParseError jpe;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &jpe);
+    if (jpe.error != QJsonParseError::NoError) {
+        qCWarning(logAppDock) << "Failed to parse JSON config file:" << jpe.errorString();
+        return "";
+    }
+
+    QJsonObject rootObj = doc.object();
+    QJsonObject protocolAliasObj = rootObj.value("NetworkProtocolDeviceAlias").toObject();
+    QJsonArray itemsArray = protocolAliasObj.value("Items").toArray();
+
+    // Search for matching scheme and host
+    for (const QJsonValue &item : itemsArray) {
+        QJsonObject itemObj = item.toObject();
+        QString itemScheme = itemObj.value("scheme").toString();
+        if (itemScheme != scheme)
+            continue;
+
+        QJsonArray devicesArray = itemObj.value("devices").toArray();
+        for (const QJsonValue &device : devicesArray) {
+            QJsonObject deviceObj = device.toObject();
+            QString deviceHost = deviceObj.value("host").toString();
+
+            if (deviceHost == host) {
+                QString alias = deviceObj.value("alias").toString();
+                return alias;
+            }
+        }
+    }
+
     return "";
 }

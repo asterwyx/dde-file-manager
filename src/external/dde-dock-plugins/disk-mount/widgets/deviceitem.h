@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,6 +9,8 @@
 
 #include <QFrame>
 #include <QMouseEvent>
+
+class IconLabel;
 
 class QLabel;
 class QProgressBar;
@@ -21,6 +23,8 @@ public:
 
 protected:
     void mouseReleaseEvent(QMouseEvent *) override;
+    void resizeEvent(QResizeEvent *e) override;
+    void showEvent(QShowEvent *e) override;
 
 public Q_SLOTS:
     void updateUsage(quint64 usedSize);
@@ -31,14 +35,16 @@ Q_SIGNALS:
 private:
     void initUI();
     void openDevice();
+    void updateDeviceName();
     static void setTextColor(QWidget *obj, int themeType, double alpha);
-    static void setTextFont(QWidget *obj, int size, int weight);
 
 private:
     DockItemData data;
 
     QLabel *sizeLabel { nullptr };
+    QLabel *nameLabel { nullptr };
     QProgressBar *sizeProgress { nullptr };
+    IconLabel *deviceIconLabel { nullptr };
 };
 
 #endif   // DEVICEITEM_H

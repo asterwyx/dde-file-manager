@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,10 +10,12 @@
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QDir>
+#include <QProcessEnvironment>
 
 #include <unistd.h>
 #include <fcntl.h>
 #include <mutex>
+#include <pwd.h>
 
 DCORE_USE_NAMESPACE
 using namespace dfmbase;
@@ -71,7 +73,8 @@ bool SysInfoUtils::isDesktopSys()
 
 bool SysInfoUtils::isOpenAsAdmin()
 {
-    return SysInfoUtils::isRootUser() && SysInfoUtils::isDesktopSys();
+    const QProcessEnvironment &env = QProcessEnvironment::systemEnvironment();
+    return SysInfoUtils::isRootUser() && SysInfoUtils::isDesktopSys() && env.contains("PKEXEC_UID");
 }
 
 bool SysInfoUtils::isDeveloperModeEnabled()
@@ -90,15 +93,21 @@ bool SysInfoUtils::isDeveloperModeEnabled()
 
         QString func("IsDeveloperMode");
         QDBusReply<bool> reply = interface.call(func);
-        developerModel = reply.value();
+        if (reply.isValid()) {
+            developerModel = reply.value();
+            qCDebug(logDFMBase) << "Developer mode status retrieved:" << developerModel;
+        } else {
+            qCWarning(logDFMBase) << "Failed to query developer mode status via DBus:" << reply.error().message();
+            developerModel = false;
+        }
     }
 
     return developerModel;
 }
 
-bool SysInfoUtils::isProfessional()
+bool SysInfoUtils::isDeepin23()
 {
-    return DSysInfo::deepinType() == DSysInfo::DeepinProfessional;
+    return DSysInfo::isCommunityEdition() && DSysInfo::productVersion() == "23";
 }
 
 bool SysInfoUtils::isSameUser(const QMimeData *data)
@@ -111,7 +120,7 @@ void SysInfoUtils::setMimeDataUserId(QMimeData *data)
 {
     QByteArray userId;
     QString strUserID = QString::number(getUserId());
-    userId.append(strUserID);
+    userId.append(strUserID.toUtf8());
     data->setData(DFMGLOBAL_NAMESPACE::Mime::kDataUserIDKey, userId);
 
     QString strKey = QString(DFMGLOBAL_NAMESPACE::Mime::kDataUserIDKey) + "_" + strUserID;
@@ -170,4 +179,26 @@ float SysInfoUtils::getMemoryUsage(int pid)
     }
 
     return usage;
+}
+
+QString SysInfoUtils::getOriginalUserHome()
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    if (!env.contains("PKEXEC_UID")) {
+        return QDir::homePath();
+    }
+
+    bool ok;
+    uid_t originalUid = env.value("PKEXEC_UID").toUInt(&ok);
+    if (!ok || originalUid == 0) {
+        return QDir::homePath();
+    }
+
+    struct passwd *pw = getpwuid(originalUid);
+    if (!pw) {
+        qCWarning(logDFMBase) << "Could not find user for original UID" << originalUid;
+        return QDir::homePath();
+    }
+
+    return QDir(QString::fromStdString(pw->pw_dir)).canonicalPath();
 }

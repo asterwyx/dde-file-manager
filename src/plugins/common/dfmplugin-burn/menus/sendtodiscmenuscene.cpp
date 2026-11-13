@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,7 +8,7 @@
 #include "events/burneventreceiver.h"
 #include "events/burneventcaller.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_menu_defines.h>
 #include <dfm-base/dfm_global_defines.h>
@@ -230,8 +230,7 @@ bool SendToDiscMenuScene::create(QMenu *parent)
     // mount image
     auto focusInfo { InfoFactory::create<FileInfo>(d->focusFile) };
     if (focusInfo) {
-        static QSet<QString> mountable { "application/x-cd-image", "application/x-iso9660-image" };
-        if (mountable.contains(focusInfo->nameOf(NameInfoType::kMimeTypeName))) {
+        if (BurnHelper::isMountableImage(focusInfo->nameOf(NameInfoType::kMimeTypeName))) {
             QAction *act { parent->addAction(d->predicateName[ActionId::kMountImageKey]) };
             act->setProperty(ActionPropertyKey::kActionID, ActionId::kMountImageKey);
             d->predicateAction.insert(ActionId::kMountImageKey, act);

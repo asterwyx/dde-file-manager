@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,14 +6,15 @@
 #include "defendercontroller.h"
 
 #include <dfm-base/dfm_global_defines.h>
-#include <dfm-base/base/application/application.h>
-#include <dfm-base/base/application/settings.h>
 #include <dfm-base/base/device/deviceutils.h>
+#include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 #include <dfm-base/dbusservice/global_server_defines.h>
+#include <dfm-base/dbusservice/opticalshareproxy.h>
 #include <dfm-base/dialogs/mountpasswddialog/mountaskpassworddialog.h>
 #include <dfm-base/utils/universalutils.h>
 #include <dfm-base/utils/dialogmanager.h>
 #include <dfm-base/utils/networkutils.h>
+#include <dfm-base/utils/protocolutils.h>
 
 #include <DDesktopServices>
 #include <dtkwidget_global.h>
@@ -23,17 +24,37 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QTextStream>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStorageInfo>
 
 #include <dfm-mount/dmount.h>
 #include <dfm-burn/dburn_global.h>
-
-static constexpr char kBurnAttribute[] { "BurnAttribute" };
-static constexpr char kBurnTotalSize[] { "BurnTotalSize" };
-static constexpr char kBurnUsedSize[] { "BurnUsedSize" };
-static constexpr char kBurnMediaType[] { "BurnMediaType" };
-static constexpr char kBurnWriteSpeed[] { "BurnWriteSpeed" };
+#include <sys/statvfs.h>
 
 using namespace dfmbase;
+
+namespace {
+
+const QHash<QString, QString> &defaultPortMap()
+{
+    static const QHash<QString, QString> map = {
+        { Global::Scheme::kFtp, "21" },
+        { Global::Scheme::kSFtp, "22" },
+        { Global::Scheme::kDav, "80" },
+        { Global::Scheme::kDavs, "443" },
+        { Global::Scheme::kNfs, "2049" }
+    };
+    return map;
+}
+
+QString defaultPortForScheme(const QString &scheme)
+{
+    return defaultPortMap().value(scheme, QString());
+}
+
+}   // namespace
+
 DFM_MOUNT_USE_NS
 // see: https://github.com/linuxdeepin/dtk/issues/134
 DWIDGET_USE_NAMESPACE
@@ -46,7 +67,9 @@ DevAutoPtr DeviceHelper::createDevice(const QString &devId, dfmmount::DeviceType
 
     auto manager = DDeviceManager::instance();
     auto monitor = manager->getRegisteredMonitor(type);
-    Q_ASSERT_X(monitor, "DeviceServiceHelper", "dfm-mount return a NULL monitor!");
+    if (!monitor)
+        return nullptr;
+
     return monitor->createDeviceById(devId);
 }
 
@@ -66,7 +89,7 @@ QVariantMap DeviceHelper::loadBlockInfo(const QString &id)
 {
     auto dev = DeviceHelper::createBlockDevice(id);
     if (!dev) {
-        qCWarning(logDFMBase) << "device is not exist!: " << id;
+        qCWarning(logDFMBase) << "Failed to create block device:" << id;
         return QVariantMap();
     }
     return loadBlockInfo(dev);
@@ -118,9 +141,39 @@ QVariantMap DeviceHelper::loadBlockInfo(const BlockDevAutoPtr &dev)
     datas[kConnectionBus] = getNullStrIfNotValid(Property::kDriveConnectionBus);
     datas[kDriveModel] = getNullStrIfNotValid(Property::kDriveModel);
     datas[kPreferredDevice] = getNullStrIfNotValid(Property::kBlockPreferredDevice);
+    datas[kSymlinks] = dev->getProperty(dfmmount::Property::kBlockSymlinks).toStringList();
 
-    if (dev->optical())
-        datas[kUDisks2Size] = dev->sizeTotal();
+    auto config = dev->getProperty(Property::kBlockConfiguration).toMap();
+    if (!config.isEmpty()) {
+        QJsonObject jsonRootObj;
+        QMapIterator<QString, QVariant> iter(config);
+        while (iter.hasNext()) {
+            iter.next();
+            auto key = iter.key();
+            QVariantMap value = iter.value().toMap();
+            jsonRootObj.insert(key, QJsonObject::fromVariantMap(value));
+        }
+        QJsonDocument doc(jsonRootObj);
+        datas[kConfiguration] = QString(doc.toJson(QJsonDocument::Compact));
+    }
+
+    datas[kUDisks2Size] = dev->sizeTotal();
+    auto mpt = dev->mountPoint();
+    if (!mpt.isEmpty() && !dev->optical()) {
+        auto type = DConfigManager::instance()->value("org.deepin.dde.file-manager.mount",
+                                                      "deviceCapacityDisplay",
+                                                      DEVICE_SIZE_DISPLAY_BY_DISK)
+                            .toInt();
+        if (type == DEVICE_SIZE_DISPLAY_BY_FS) {
+            struct statvfs fsInfo;
+            int ok = statvfs(mpt.toStdString().c_str(), &fsInfo);
+            if (ok == 0) {
+                const quint64 blksize = quint64(fsInfo.f_frsize);
+                auto total = fsInfo.f_blocks * blksize;
+                datas[kSizeTotal] = total;
+            }
+        }
+    }
 
     auto eType = dev->partitionEType();
     datas[kHasExtendedPatition] = eType == PartitionType::kMbrWin95_Extended_LBA
@@ -139,7 +192,7 @@ QVariantMap DeviceHelper::loadProtocolInfo(const QString &id)
 {
     auto dev = DeviceHelper::createProtocolDevice(id);
     if (!dev) {
-        qCWarning(logDFMBase) << "device is not exist!: " << id;
+        qCWarning(logDFMBase) << "Failed to create protocol device:" << id;
         return {};
     }
     return loadProtocolInfo(dev);
@@ -165,6 +218,101 @@ QVariantMap DeviceHelper::loadProtocolInfo(const ProtocolDevAutoPtr &dev)
     datas[kDeviceIcon] = dev->deviceIcons();
 
     return datas;
+}
+
+bool DeviceHelper::queryUsageOfBlockRealTime(const QVariantMap &itemData, quint64 *total, quint64 *avai, quint64 *used)
+{
+    Q_ASSERT(total);
+    Q_ASSERT(avai);
+    Q_ASSERT(used);
+    using namespace GlobalServerDefines;
+
+    if (itemData.value(DeviceProperty::kMountPoint).toString().isEmpty())
+        return false;
+
+    // 光驱设备特殊处理
+    if (itemData.value(DeviceProperty::kOpticalDrive).toBool()) {
+        QVariantMap opticalStorage = itemData;
+        DeviceHelper::readOpticalInfo(opticalStorage);
+        *total = opticalStorage.value(DeviceProperty::kSizeTotal).toULongLong();
+        *avai = opticalStorage.value(DeviceProperty::kSizeFree).toULongLong();
+        *used = opticalStorage.value(DeviceProperty::kSizeUsed).toULongLong();
+        return true;
+    }
+
+    // 根据配置选择查询方式
+    auto type = DConfigManager::instance()->value("org.deepin.dde.file-manager.mount",
+                                                  "deviceCapacityDisplay",
+                                                  DEVICE_SIZE_DISPLAY_BY_DISK)
+                        .toInt();
+
+    if (type == DEVICE_SIZE_DISPLAY_BY_FS) {
+        // 使用 statvfs 查询（文件系统方式）
+        struct statvfs fsInfo;
+        QString mpt = itemData.value(DeviceProperty::kMountPoint).toString();
+        int ok = statvfs(mpt.toStdString().c_str(), &fsInfo);
+        if (ok == 0) {
+            const quint64 blksize = quint64(fsInfo.f_frsize);
+            *total = fsInfo.f_blocks * blksize;
+            *avai = fsInfo.f_bavail * blksize;
+            *used = (fsInfo.f_blocks - fsInfo.f_bavail) * blksize;
+            return true;
+        }
+    } else {
+        // 使用 QStorageInfo 查询（磁盘方式）
+        QStorageInfo si(itemData.value(DeviceProperty::kMountPoint).toString());
+        *total = itemData.value(DeviceProperty::kUDisks2Size).toULongLong();
+        qint64 available = si.bytesAvailable();
+        if (available < 0)   // if negative value returned, error occurred.
+            return false;
+        *avai = static_cast<quint64>(available);
+        *used = *total - *avai;
+        return true;
+    }
+
+    return false;
+}
+
+bool DeviceHelper::queryUsageOfProtocolRealTime(const QVariantMap &itemData, quint64 *total, quint64 *avai, quint64 *used)
+{
+    Q_ASSERT(total);
+    Q_ASSERT(avai);
+    Q_ASSERT(used);
+    using namespace GlobalServerDefines;
+
+    if (itemData.value(DeviceProperty::kMountPoint).toString().isEmpty())
+        return false;
+
+    const QString &devId = itemData.value(DeviceProperty::kId).toString();
+    if (devId.isEmpty())
+        return false;
+
+    auto dev = DeviceHelper::createProtocolDevice(devId);
+    if (!dev)
+        return false;
+
+    *total = static_cast<quint64>(dev->sizeTotal());
+    *avai = static_cast<quint64>(dev->sizeFree());
+    *used = static_cast<quint64>(dev->sizeUsage());
+
+    return true;
+}
+
+bool DeviceHelper::queryDeviceUsageRealTime(const QVariantMap &itemData, quint64 *total, quint64 *avai, quint64 *used)
+{
+    Q_ASSERT(total);
+    Q_ASSERT(avai);
+    Q_ASSERT(used);
+    using namespace GlobalServerDefines;
+
+    const QString &devId = itemData.value(DeviceProperty::kId).toString();
+
+    // 根据设备ID前缀判断设备类型，调用对应的查询方法
+    if (devId.startsWith(kBlockDeviceIdPrefix)) {
+        return queryUsageOfBlockRealTime(itemData, total, avai, used);
+    } else {
+        return queryUsageOfProtocolRealTime(itemData, total, avai, used);
+    }
 }
 
 bool DeviceHelper::isMountableBlockDev(const QString &id, QString &why)
@@ -250,11 +398,10 @@ bool DeviceHelper::askForStopScanning(const QUrl &mpt)
     DDialog *dlg = DialogManagerInstance->showQueryScanningDialog(QObject::tr("Scanning the device, stop it?"));
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     if (dlg->exec() == QDialog::Accepted) {
-        if (DefenderController::instance().stopScanning(mpt))
-            return true;
-
-        qCWarning(logDFMBase) << "stop scanning device failed: " << mpt;
-        DialogManagerInstance->showErrorDialog(QObject::tr("Unmount failed"), QObject::tr("Cannot stop scanning device"));
+        DefenderController::instance().stopScanning(mpt);
+        return true;
+    } else {
+        qCWarning(logDFMBase) << "user rejected to stop scanning: " << mpt;
     }
     return false;
 }
@@ -268,7 +415,7 @@ void DeviceHelper::openFileManagerToDevice(const QString &blkId, const QString &
         //            mountPoint = QString("burn:///dev/%1/disc_files/").arg(blkId.mid(blkId.lastIndexOf("/") + 1));
         //        }
         QProcess::startDetached(QStringLiteral("dde-file-manager"), { mountPoint });
-        qCInfo(logDFMBase) << "open by dde-file-manager: " << mountPoint;
+        qCInfo(logDFMBase) << "Opened device in file manager - device:" << blkId << "mount point:" << mountPoint;
         return;
     }
 
@@ -306,62 +453,80 @@ void DeviceHelper::persistentOpticalInfo(const QVariantMap &datas)
     QVariantMap info;
     QString tag { datas.value(DeviceProperty::kDevice).toString().mid(5) };
 
-    info[kBurnTotalSize] = datas.value(DeviceProperty::kSizeTotal);
-    info[kBurnUsedSize] = datas.value(DeviceProperty::kSizeUsed);
-    info[kBurnMediaType] = datas.value(DeviceProperty::kOpticalMediaType);
-    info[kBurnWriteSpeed] = datas.value(DeviceProperty::kOpticalWriteSpeed);
+    info[OpticalShareField::kTotalSize] = datas.value(DeviceProperty::kSizeTotal);
+    info[OpticalShareField::kUsedSize] = datas.value(DeviceProperty::kSizeUsed);
+    info[OpticalShareField::kMediaType] = datas.value(DeviceProperty::kOpticalMediaType);
+    info[OpticalShareField::kWriteSpeed] = datas.value(DeviceProperty::kOpticalWriteSpeed);
 
-    Application::dataPersistence()->setValue(kBurnAttribute, tag, info);
-    Application::dataPersistence()->sync();
+    OpticalShareProxy::instance().setBurnAttribute(tag, info);
 
-    qCDebug(logDFMBase) << "optical usage persistented: " << datas;
+    qCDebug(logDFMBase) << "Optical device usage info persisted for device:" << tag
+                        << "total size:" << info[OpticalShareField::kTotalSize].toULongLong()
+                        << "used size:" << info[OpticalShareField::kUsedSize].toULongLong();
+}
+
+void DeviceHelper::clearOpticalInfo(const QString &tag)
+{
+    if (tag.isEmpty())
+        return;
+
+    OpticalShareProxy::instance().clearBurnAttribute(tag);
 }
 
 void DeviceHelper::readOpticalInfo(QVariantMap &datas)
 {
     using namespace GlobalServerDefines;
     QString tag { datas.value(DeviceProperty::kDevice).toString().mid(5) };
+    const QVariantMap info = OpticalShareProxy::instance().burnAttribute(tag);
+    if (info.isEmpty())
+        return;
 
-    if (Application::dataPersistence()->keys(kBurnAttribute).contains(tag)) {
-        const QMap<QString, QVariant> &info = Application::dataPersistence()->value(kBurnAttribute, tag).toMap();
-        datas[DeviceProperty::kSizeTotal] = static_cast<qint64>(info.value(kBurnTotalSize).toULongLong());
-        datas[DeviceProperty::kSizeUsed] = static_cast<qint64>(info.value(kBurnUsedSize).toULongLong());
-        datas[DeviceProperty::kSizeFree] = datas[DeviceProperty::kSizeTotal].toULongLong() - datas[DeviceProperty::kSizeUsed].toULongLong();
-        datas[DeviceProperty::kOpticalMediaType] = info.value(kBurnMediaType).toInt();
-        datas[DeviceProperty::kOpticalWriteSpeed] = info.value(kBurnWriteSpeed).toStringList();
-
-        qCDebug(logDFMBase) << "optical usage loaded: " << tag << "\n"
-                            << "sizeTotal: " << datas.value(DeviceProperty::kSizeTotal) << "\n"
-                            << "sizeUsed: " << datas.value(DeviceProperty::kSizeUsed) << "\n"
-                            << "sizeFree: " << datas.value(DeviceProperty::kSizeFree) << "\n"
-                            << "mediaType: " << datas.value(DeviceProperty::kOpticalMediaType) << "\n"
-                            << "speed: " << datas.value(DeviceProperty::kOpticalWriteSpeed);
-    }
+    datas[DeviceProperty::kSizeTotal] = static_cast<qint64>(info.value(OpticalShareField::kTotalSize).toULongLong());
+    datas[DeviceProperty::kSizeUsed] = static_cast<qint64>(info.value(OpticalShareField::kUsedSize).toULongLong());
+    datas[DeviceProperty::kSizeFree] = datas[DeviceProperty::kSizeTotal].toULongLong() - datas[DeviceProperty::kSizeUsed].toULongLong();
+    datas[DeviceProperty::kOpticalMediaType] = info.value(OpticalShareField::kMediaType).toInt();
+    datas[DeviceProperty::kOpticalWriteSpeed] = info.value(OpticalShareField::kWriteSpeed).toStringList();
 }
 
 bool DeviceHelper::checkNetworkConnection(const QString &id)
 {
     QUrl url(id);
-    if (!(DeviceUtils::isSamba(url) || DeviceUtils::isSftp(url) || DeviceUtils::isFtp(url)))
+    if (!ProtocolUtils::isRemoteFile(url)
+        || ProtocolUtils::isMTPFile(url)
+        || ProtocolUtils::isGphotoFile(url))
         return true;
 
     QString host, port;
-    if (NetworkUtils::instance()->parseIp(url.path(), host, port)) {
-        if (url.scheme() == "smb" && url.port() == -1) {
-            QStringList defaultSmbPorts = { "445", "139" };
-            return std::any_of(defaultSmbPorts.cbegin(), defaultSmbPorts.cend(),
-                               [host](const QString &port) {
-                                   bool connected = NetworkUtils::instance()->checkNetConnection(host, port);
-                                   qCDebug(logDFMBase) << "checking network connection of" << host
-                                                       << "at" << port
-                                                       << connected;
-                                   return connected;
-                               });
-        }
+    // Prefer standard URI parsing first (e.g. sftp://host/, davs://host/path).
+    host = url.host();
+    if (!host.isEmpty()) {
+        if (url.port() > 0)
+            port = QString::number(url.port());
+        else
+            port = defaultPortForScheme(url.scheme());
+    }
+
+    // Fallback to existing mount-path parser for gvfs/cifs style local mount paths.
+    if (host.isEmpty() || port.isEmpty())
+        NetworkUtils::instance()->parseIp(url.path(), host, port);
+
+    if (url.scheme() == "smb" && url.port() == -1) {
+        QStringList defaultSmbPorts = { "445", "139" };
+        return std::any_of(defaultSmbPorts.cbegin(), defaultSmbPorts.cend(),
+                           [host](const QString &port) {
+                               bool connected = NetworkUtils::instance()->checkNetConnection(host, port);
+                               qCDebug(logDFMBase) << "Network connection check for host:" << host
+                                                   << "port:" << port
+                                                   << "result:" << connected;
+                               return connected;
+                           });
+    }
+
+    if (!host.isEmpty() && !port.isEmpty()) {
         return NetworkUtils::instance()->checkNetConnection(host, port);
     }
 
-    qCWarning(logDFMBase) << "cannot parse host and port of" << id;
+    qCWarning(logDFMBase) << "Failed to parse host and port from device ID:" << id;
     return true;
 }
 
@@ -381,7 +546,7 @@ QVariantMap DeviceHelper::makeFakeProtocolInfo(const QString &id)
     fakeInfo[DeviceProperty::kDeviceIcon] = "folder-remote";
     fakeInfo["fake"] = true;
 
-    if (DeviceUtils::isSamba(QUrl(path))) {
+    if (ProtocolUtils::isSMBFile(QUrl(path))) {
         QString host, share;
         if (DeviceUtils::parseSmbInfo(path, host, share))
             fakeInfo[DeviceProperty::kDisplayName] = QObject::tr("%1 on %2").arg(share).arg(host);
@@ -389,7 +554,12 @@ QVariantMap DeviceHelper::makeFakeProtocolInfo(const QString &id)
             fakeInfo[DeviceProperty::kDisplayName] = QObject::tr("Unknown");
     } else {
         QString host, port;
-        if (NetworkUtils::instance()->parseIp(QUrl(id).path(), host, port))
+        QUrl url(id);
+        host = url.host();
+        if (host.isEmpty())
+            NetworkUtils::instance()->parseIp(url.path(), host, port);
+
+        if (!host.isEmpty())
             fakeInfo[DeviceProperty::kDisplayName] = host;
         else
             fakeInfo[DeviceProperty::kDisplayName] = QObject::tr("Unknown");

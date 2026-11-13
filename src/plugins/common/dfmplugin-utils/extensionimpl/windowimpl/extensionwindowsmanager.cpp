@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -18,11 +18,14 @@ DFMBASE_USE_NAMESPACE
 static void doActionForEveryPlugin(std::function<void(DFMEXT::DFMExtWindowPlugin *)> callback)
 {
     Q_ASSERT(callback);
-    Q_ASSERT(ExtensionPluginManager::instance().initialized());
+    if (!ExtensionPluginManager::instance().initialized()) {
+        fmWarning() << "The event occurs before any plugin initialization is complete";
+        return;
+    }
     const auto &windowPlugins { ExtensionPluginManager::instance().windowPlugins() };
-    std::for_each(windowPlugins.begin(), windowPlugins.end(), [callback](QSharedPointer<DFMEXT::DFMExtWindowPlugin> plugin) {
+    std::for_each(windowPlugins.begin(), windowPlugins.end(), [callback](DFMEXT::DFMExtWindowPlugin *plugin) {
         Q_ASSERT(plugin);
-        callback(plugin.data());
+        callback(plugin);
     });
 }
 

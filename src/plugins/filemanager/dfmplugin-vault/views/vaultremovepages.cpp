@@ -1,11 +1,10 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vaultremovepages.h"
 #include "utils/encryption/interfaceactivevault.h"
 #include "utils/vaulthelper.h"
-#include "utils/policy/policymanager.h"
 #include "utils/pathmanager.h"
 #include "utils/servicemanager.h"
 #include "utils/fileencrypthandle.h"
@@ -24,7 +23,7 @@
 #include <DLabel>
 
 #include <QFrame>
-#include <QRegExpValidator>
+#include <QRegularExpressionValidator>
 #include <QStackedWidget>
 #include <QAbstractButton>
 #include <QLabel>
@@ -36,7 +35,6 @@ Q_DECLARE_METATYPE(const char *)
 constexpr int kKeyVerifyDeleteBtn = 1;
 constexpr int kPassWordDeleteBtn = 2;
 
-using namespace PolkitQt1;
 DWIDGET_USE_NAMESPACE
 using namespace dfmplugin_vault;
 
@@ -49,20 +47,26 @@ VaultRemovePages::VaultRemovePages(QWidget *parent)
 
 void VaultRemovePages::pageSelect(RemoveWidgetType type)
 {
+    fmDebug() << "Vault: Selecting remove page type:" << static_cast<int>(type);
     switch (type) {
     case kPasswordWidget: {
+        fmDebug() << "Vault: Showing password widget";
         showPasswordWidget();
     } break;
     case kRecoveryKeyWidget: {
+        fmDebug() << "Vault: Showing recovery key widget";
         showRecoveryKeyWidget();
     } break;
     case kRemoveProgressWidget: {
+        fmDebug() << "Vault: Showing remove progress widget";
         showRemoveProgressWidget();
     } break;
     case kNoneWidget: {
+        fmDebug() << "Vault: Showing none widget";
         showNodeWidget();
     } break;
     default:
+        fmDebug() << "Vault: Unknown remove widget type:" << static_cast<int>(type);
         break;
     }
 }
@@ -109,10 +113,6 @@ void VaultRemovePages::showRecoveryKeyWidget()
 void VaultRemovePages::showRemoveProgressWidget()
 {
     clearContents(true);
-    if (getButtons().size() > 1) {
-        getButton(0)->setVisible(false);
-        getButton(1)->setVisible(false);
-    }
     clearButtons();
 
     progressView = new VaultRemoveProgressView(this);
@@ -148,12 +148,6 @@ void VaultRemovePages::showNodeWidget()
     connect(noneWidget, &VaultRemoveByNoneWidget::jumpPage, this, &VaultRemovePages::pageSelect);
 }
 
-void VaultRemovePages::showEvent(QShowEvent *event)
-{
-    PolicyManager::setVauleCurrentPageMark(PolicyManager::VaultPageMark::kDeleteVaultPage);
-    DDialog::showEvent(event);
-}
-
 void VaultRemovePages::onButtonClicked(int index, const QString &text)
 {
     if (!getContent(0))
@@ -186,7 +180,7 @@ void VaultRemovePages::initUI()
         this->windowHandle()->setProperty("_d_dwayland_resizable", false);
     }
 
-    setIcon(QIcon(":/icons/deepin/builtin/icons/dfm_vault_32px.svg"));
+    setIcon(QIcon::fromTheme("safebox"));
     this->setFixedWidth(396);
     setOnButtonClickedClose(false);
 }

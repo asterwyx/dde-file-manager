@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,6 +12,7 @@ DPF_USE_NAMESPACE
  */
 void Plugin::initialize()
 {
+    qCDebug(logDPF) << "Plugin::initialize: default implementation called";
 }
 
 /*!
@@ -19,4 +20,5 @@ void Plugin::initialize()
  */
 void Plugin::stop()
 {
+    qCDebug(logDPF) << "Plugin::stop: default implementation called";
 }

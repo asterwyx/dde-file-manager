@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,7 @@
 #define VAULTACTIVESTARTVIEW_H
 
 #include "dfmplugin_vault_global.h"
+#include "vaultbaseview.h"
 
 #include <DPushButton>
 #include <DLabel>
@@ -14,17 +15,11 @@
 #include <QWidget>
 
 namespace dfmplugin_vault {
-class VaultActiveStartView : public QWidget
+class VaultActiveStartView : public VaultBaseView
 {
     Q_OBJECT
 public:
     explicit VaultActiveStartView(QWidget *parent = nullptr);
-
-signals:
-    void sigAccepted();
-
-private slots:
-    void slotStartBtnClicked();
 
 private:
     void initUi();

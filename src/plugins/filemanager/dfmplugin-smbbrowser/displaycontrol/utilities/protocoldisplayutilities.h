@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -35,8 +35,17 @@ void callComputerRefresh();
 void callForgetPasswd(const QString &stdSmb);
 
 void sidebarMenuCall(quint64 winId, const QUrl &url, const QPoint &pos);
+void sidebarItemClicked(quint64 winId, const QUrl &url);
+void sidebarItemRename(quint64 windowId, const QUrl &url, const QString &name);
+bool sidebarUrlEquals(const QUrl &item, const QUrl &target);
 
 }   // namespace computer_sidebar_event_calls
+
+namespace secret_utils {
+
+void forgetPasswordInSession(const QString &host);
+
+}   //namespace secret_utils
 
 namespace ui_ventry_calls {
 void addAggregatedItemForSeperatedOnlineItem(const QUrl &entryUrl);

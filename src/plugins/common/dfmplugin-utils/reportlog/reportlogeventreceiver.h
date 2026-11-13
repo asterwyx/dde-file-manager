@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,7 +25,7 @@ public:
 
 public Q_SLOTS:
     void handleBlockMountData(const QString &id, bool result);
-    void handleMountNetworkResult(bool ret, DFMMOUNT::DeviceError err, const QString &msg);
+    void handleMountNetworkResult(const QString &address, bool ret, DFMMOUNT::DeviceError err, const QString &msg);
     void handleDesktopStartupData(const QString &key, const QVariant &data);
 
 private:

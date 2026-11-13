@@ -1,16 +1,20 @@
-// SPDX-FileCopyrightText: 2023 - 2024 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "iconutils.h"
+
+#include <dfm-base/dfm_global_defines.h>
 
 #include <QPainter>
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include <QWidget>
+#include <QApplication>
 
 DFMBASE_USE_NAMESPACE
 
-QPixmap IconUtils::renderIconBackground(const QSize &size)
+QPixmap IconUtils::renderIconBackground(const QSize &size, const IconStyle &style)
 {
     QPixmap pm { size };
     pm.fill(Qt::transparent);
@@ -20,9 +24,9 @@ QPixmap IconUtils::renderIconBackground(const QSize &size)
     p.setBrush(Qt::white);
 
     QRect rect { { 0, 0 }, size };
-    p.drawRoundedRect(rect, 6, 6);
+    p.drawRoundedRect(rect, style.radius, style.radius);
     p.end();
-    return addShadowToPixmap(pm, 1, 2, 0.2);
+    return pm;
 }
 
 QPixmap IconUtils::addShadowToPixmap(const QPixmap &originalPixmap, int shadowOffsetY, qreal blurRadius, qreal shadowOpacity)
@@ -52,4 +56,66 @@ QPixmap IconUtils::addShadowToPixmap(const QPixmap &originalPixmap, int shadowOf
 
     delete shadowEffect;
     return resultPixmap;
+}
+
+IconUtils::IconStyle IconUtils::getIconStyle(int size)
+{
+    IconStyle style;
+    const int normalizedSize = qMax(0, size);
+    // Base ratio from 96px thumbnails:
+    // stroke=3 (1/32), radius=6 (1/16), shadowOffset=2 (1/48), shadowRange=4 (1/24).
+    style.stroke = qMax(1, normalizedSize / 32);
+    style.radius = qMax(1, normalizedSize / 16);
+    style.shadowOffset = qMax(1, normalizedSize / 48);
+    style.shadowRange = qMax(1, normalizedSize / 24);
+
+    return style;
+}
+
+QPixmap IconUtils::renderIconBackground(const QSizeF &size, const IconStyle &style)
+{
+    QSize pixSize(qRound(size.width()), qRound(size.height()));
+    QPixmap pm { pixSize };
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHints(p.renderHints() | QPainter::Antialiasing | QPainter::SmoothPixmapTransform, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(Qt::white);
+
+    QRectF rect { { 0, 0 }, size };
+    p.drawRoundedRect(rect, style.radius, style.radius);
+    p.end();
+    return pm;
+}
+
+bool IconUtils::shouldSkipThumbnailFrame(const QString &mimeType)
+{
+    // appimage, uab 不显示缩略图底板
+    static const QStringList kExcludedMimes = {
+        Global::Mime::kTypeAppAppimage,
+        Global::Mime::kTypeAppUab
+    };
+    return kExcludedMimes.contains(mimeType);
+}
+
+QString IconUtils::normalizeIconName(const QString &iconName)
+{
+    // 历史 mime -> 主题图标名兼容映射，集中维护（#6）
+    if (iconName == QLatin1String("application-vnd.debian.binary-package"))
+        return QStringLiteral("application-x-deb");
+    if (iconName == QLatin1String("application-vnd.rar"))
+        return QStringLiteral("application-zip");
+    if (iconName == QLatin1String("application-vnd.ms-htmlhelp"))
+        return QStringLiteral("chmsee");
+    if (iconName == QLatin1String("Zoom.png"))
+        return QStringLiteral("application-x-zoom");
+    return iconName;
+}
+
+QPixmap IconUtils::hiDpiPixmap(const QIcon &icon, const QSize &size, const QWidget *widget)
+{
+    qreal dpr = widget ? widget->devicePixelRatioF() : qApp->devicePixelRatio();
+    QPixmap pix = icon.pixmap(size * dpr);
+    pix.setDevicePixelRatio(dpr);
+    return pix;
 }

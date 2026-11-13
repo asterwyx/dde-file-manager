@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "sharecontrolwidget.h"
 #include "utils/usersharehelper.h"
+#include "utils/anonymouspermissionmanager.h"
 
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/utils/dialogmanager.h>
@@ -45,9 +46,7 @@ DWIDGET_USE_NAMESPACE
 DFMBASE_USE_NAMESPACE
 
 namespace ConstDef {
-static constexpr int kKeyWidth { 80 };
 static constexpr int kWidgetFixedWidth { 195 };
-static constexpr char kShareNameRegx[] { "^[^\\[\\]\"'/\\\\:|<>+=;,?*\r\n\t]*$" };
 static constexpr char kShareFileDir[] { "/var/lib/samba/usershares" };
 }
 
@@ -62,16 +61,9 @@ SectionKeyLabel::SectionKeyLabel(const QString &text, QWidget *parent, Qt::Windo
     : QLabel(text, parent, f)
 {
     setObjectName("SectionKeyLabel");
-#ifdef DTKWIDGET_CLASS_DSizeMode
-    setFixedWidth(DSizeModeHelper::element(ConstDef::kKeyWidth, ConstDef::kKeyWidth));
-    connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::sizeModeChanged, this, [this]() {
-        this->setFixedWidth(DSizeModeHelper::element(ConstDef::kKeyWidth, ConstDef::kKeyWidth));
-    });
-#else
-    setFixedWidth(ConstDef::kKeyWidth);
-#endif
     DFontSizeManager::instance()->bind(this, DFontSizeManager::SizeType::T7, QFont::Medium);
     setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 }
 
 ShareControlWidget::ShareControlWidget(const QUrl &url, bool disableState, QWidget *parent)
@@ -117,14 +109,15 @@ void ShareControlWidget::setupUi(bool disableState)
     mainFrame->setDisabled(disableState);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(mainFrame);
-    mainLayout->setMargin(0);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setContentsMargins(0, 0, 0, 10);
     mainLayout->setSpacing(0);
 
     QFormLayout *basicInfoFrameLay = new QFormLayout(mainFrame);
-    basicInfoFrameLay->setMargin(0);
+    basicInfoFrameLay->setContentsMargins(0, 0, 0, 0);
     basicInfoFrameLay->setContentsMargins(20, 0, 10, 0);
     basicInfoFrameLay->setVerticalSpacing(6);
+    basicInfoFrameLay->setHorizontalSpacing(6);
 
     setupShareSwitcher();
     basicInfoFrameLay->addRow(" ", shareSwitcher);
@@ -138,12 +131,12 @@ void ShareControlWidget::setupUi(bool disableState)
     // More share info
     moreInfoFrame = new QFrame(mainFrame);
     QVBoxLayout *moreInfoFrameLay = new QVBoxLayout(moreInfoFrame);
-    moreInfoFrameLay->setMargin(0);
+    moreInfoFrameLay->setContentsMargins(0, 0, 0, 0);
     moreInfoFrameLay->setContentsMargins(20, 10, 10, 0);
     moreInfoFrame->setLayout(moreInfoFrameLay);
 
     QFormLayout *formLay = new QFormLayout(moreInfoFrame);
-    formLay->setMargin(0);
+    formLay->setContentsMargins(0, 0, 0, 0);
     formLay->setContentsMargins(0, 0, 0, 0);
     formLay->addRow(new SectionKeyLabel(tr("Network path"), this), setupNetworkPath());
     formLay->addRow(new SectionKeyLabel(tr("Username"), this), setupUserName());
@@ -165,6 +158,8 @@ void ShareControlWidget::setupUi(bool disableState)
 void ShareControlWidget::setupShareSwitcher()
 {
     shareSwitcher = new QCheckBox(this);
+    shareSwitcher->setObjectName("ShareSwitcher");
+    shareSwitcher->setAccessibleName("ShareSwitcher");
     shareSwitcher->setFixedWidth(ConstDef::kWidgetFixedWidth);
     QString text = tr("Share this folder");
     shareSwitcher->setToolTip(text);
@@ -179,25 +174,22 @@ void ShareControlWidget::setupShareSwitcher()
 
 void ShareControlWidget::setupShareNameEditor()
 {
-    shareNameEditor = new QLineEdit(this);
+    shareNameEditor = new DLineEdit(this);
+    shareNameEditor->setObjectName("ShareNameEditor");
+    shareNameEditor->setAccessibleName("ShareNameEditor");
 
-    QValidator *validator = new QRegularExpressionValidator(QRegularExpression(ConstDef::kShareNameRegx), this);
-    shareNameEditor->setValidator(validator);
+    static constexpr char kShareNameRegx[] { R"(^(?![ -])[^%<>*?|/\\+=;:,"]*+ ?$)" };
+    QValidator *validator = new QRegularExpressionValidator(QRegularExpression(kShareNameRegx), this);
+    shareNameEditor->lineEdit()->setValidator(validator);
 
-    connect(shareNameEditor, &QLineEdit::textChanged, this, [=](const QString &text) {
-        QString newText(text);
-        // daemon create the mountpoint of share: <name> on <host>, which occupied 255 bytes at most.
-        // and only 255 - 20 bytes for share name.
-        // the max length of folder name limited to 255 bytes in nativa file system.
-        while (newText.toLocal8Bit().length() > (NAME_MAX - 20))
-            newText.chop(1);
-        shareNameEditor->setText(newText);
-    });
+    connect(shareNameEditor, &DLineEdit::textChanged, this, &ShareControlWidget::onShareNameChanged);
 }
 
 void ShareControlWidget::setupSharePermissionSelector()
 {
     sharePermissionSelector = new QComboBox(this);
+    sharePermissionSelector->setObjectName("SharePermissionSelector");
+    sharePermissionSelector->setAccessibleName("SharePermissionSelector");
 
     QPalette peMenuBg;
     QColor color = palette().color(QPalette::ColorGroup::Active, QPalette::ColorRole::Window);
@@ -211,6 +203,8 @@ void ShareControlWidget::setupSharePermissionSelector()
 void ShareControlWidget::setupShareAnonymousSelector()
 {
     shareAnonymousSelector = new QComboBox(this);
+    shareAnonymousSelector->setObjectName("ShareAnonymousSelector");
+    shareAnonymousSelector->setAccessibleName("ShareAnonymousSelector");
 
     QPalette peMenuBg;
     QColor color = palette().color(QPalette::ColorGroup::Active, QPalette::ColorRole::Window);
@@ -230,6 +224,8 @@ QHBoxLayout *ShareControlWidget::setupNetworkPath()
     networkAddrLabel->setFixedWidth(ConstDef::kWidgetFixedWidth);
 
     copyNetAddr = new QPushButton(this);
+    copyNetAddr->setObjectName("CopyNetAddr");
+    copyNetAddr->setAccessibleName("CopyNetAddr");
     copyNetAddr->setFlat(true);
     copyNetAddr->setToolTip(tr("Copy"));
     auto setBtnIcon = [=] {
@@ -241,12 +237,13 @@ QHBoxLayout *ShareControlWidget::setupNetworkPath()
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::themeTypeChanged,
             this, setBtnIcon);
     setBtnIcon();
-    QObject::connect(copyNetAddr, &QPushButton::clicked, [=]() {
+    QObject::connect(copyNetAddr, &QPushButton::clicked, this, [=]() {
         QClipboard *clipboard = QApplication::clipboard();
         clipboard->setText(netScheme->text() + networkAddrLabel->text());
     });
 
     QHBoxLayout *hBoxLine = new QHBoxLayout(this);
+    hBoxLine->setSpacing(0);
     hBoxLine->setContentsMargins(0, 0, 2, 0);
     hBoxLine->addWidget(netScheme);
     hBoxLine->addWidget(networkAddrLabel);
@@ -263,6 +260,8 @@ QHBoxLayout *ShareControlWidget::setupUserName()
     userNamelineLabel->setFixedWidth(ConstDef::kWidgetFixedWidth);
 
     copyUserNameBt = new QPushButton(this);
+    copyUserNameBt->setObjectName("CopyUserNameBt");
+    copyUserNameBt->setAccessibleName("CopyUserNameBt");
     copyUserNameBt->setFlat(true);
     copyUserNameBt->setToolTip(tr("Copy"));
     auto setBtnIcon = [=] {
@@ -274,7 +273,7 @@ QHBoxLayout *ShareControlWidget::setupUserName()
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::themeTypeChanged,
             this, setBtnIcon);
     setBtnIcon();
-    QObject::connect(copyUserNameBt, &QPushButton::clicked, [=]() {
+    QObject::connect(copyUserNameBt, &QPushButton::clicked, this, [this]() {
         QClipboard *clipboard = QApplication::clipboard();
         clipboard->setText(userNamelineLabel->text());
     });
@@ -299,15 +298,17 @@ QHBoxLayout *ShareControlWidget::setupSharePassword()
     sharePassword->setText(isSharePasswordSet ? "●●●●●" : tr("None"));
 
     setPasswordBt = new DCommandLinkButton(tr("Set password"));
+    setPasswordBt->setObjectName("SetPasswordBt");
+    setPasswordBt->setAccessibleName("SetPasswordBt");
     setPasswordBt->setText(isSharePasswordSet ? tr("Change password") : tr("Set password"));
     setPasswordBt->setContentsMargins(0, 0, 0, 0);
     setPasswordBt->setToolTip(setPasswordBt->text());
-    QObject::connect(setPasswordBt, &QPushButton::clicked, [this]() {
+    QObject::connect(setPasswordBt, &QPushButton::clicked, this, [this]() {
         showSharePasswordSettingsDialog();
     });
 
     QHBoxLayout *hBoxLine = new QHBoxLayout(this);
-    hBoxLine->setMargin(0);
+    hBoxLine->setContentsMargins(0, 0, 0, 0);
     hBoxLine->setStretch(0, 1);
     hBoxLine->addWidget(sharePassword);
     hBoxLine->addWidget(setPasswordBt);
@@ -353,7 +354,8 @@ void ShareControlWidget::init()
 
     if (!watcher) {
         watcher = WatcherFactory::create<AbstractFileWatcher>(info->urlOf(UrlInfoType::kParentUrl));
-        watcher->startWatcher();
+        if (watcher)
+            watcher->startWatcher();
     }
 
     QString filePath = url.path();
@@ -382,14 +384,15 @@ void ShareControlWidget::initConnection()
 
     connect(shareAnonymousSelector, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &ShareControlWidget::updateShare);
     connect(sharePermissionSelector, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &ShareControlWidget::updateShare);
-    connect(shareNameEditor, &QLineEdit::editingFinished, this, &ShareControlWidget::updateShare);
+    connect(shareNameEditor, &DLineEdit::editingFinished, this, &ShareControlWidget::updateShare);
     connect(UserShareHelper::instance(), &UserShareHelper::sambaPasswordSet, this, &ShareControlWidget::onSambaPasswordSet);
 
     dpfSignalDispatcher->subscribe("dfmplugin_dirshare", "signal_Share_ShareAdded", this, &ShareControlWidget::updateWidgetStatus);
     dpfSignalDispatcher->subscribe("dfmplugin_dirshare", "signal_Share_ShareRemoved", this, &ShareControlWidget::updateWidgetStatus);
     dpfSignalDispatcher->subscribe("dfmplugin_dirshare", "signal_Share_RemoveShareFailed", this, &ShareControlWidget::updateWidgetStatus);
 
-    connect(watcher.data(), &AbstractFileWatcher::fileRename, this, &ShareControlWidget::updateFile);
+    if (!watcher.isNull())
+        connect(watcher.data(), &AbstractFileWatcher::fileRename, this, &ShareControlWidget::updateFile);
 
     // the timer is used to control the frequency of switcher action.
     connect(timer, &QTimer::timeout, this, [this] { shareSwitcher->setEnabled(true); });
@@ -433,7 +436,7 @@ bool ShareControlWidget::validateShareName()
     for (const auto &shareFile : shareFileLst) {
         if (name.toLower() == shareFile.fileName()) {
             DDialog dlg(this);
-            dlg.setIcon(QIcon::fromTheme("dialog-warning"));
+            dlg.setIcon(QIcon::fromTheme("dde-file-manager"));
 
             if (!shareFile.isWritable()) {
                 dlg.setTitle(tr("The share name is used by another user."));
@@ -457,46 +460,68 @@ bool ShareControlWidget::validateShareName()
 
 void ShareControlWidget::updateShare()
 {
-    shareFolder();
-}
+    QString filePath = url.toLocalFile();
 
-void ShareControlWidget::shareFolder()
-{
-    if (!shareSwitcher->isChecked())
-        return;
+    // Revert to the previous share name when the editor is emptied.
+    if (shareNameEditor->text().trimmed().isEmpty()) {
+        QString fallback = UserShareHelperInstance->shareNameByPath(filePath);
+        if (fallback.isEmpty() && info)
+            fallback = info->displayOf(DisPlayInfoType::kFileDisplayName);
+        if (!fallback.isEmpty())
+            shareNameEditor->setText(fallback);
+    }
 
-    if (!validateShareName()) {
+    // Get share info before update
+    auto oldShareInfo = UserShareHelperInstance->shareInfoByPath(filePath);
+    bool wasAnonymous = oldShareInfo.value(ShareInfoKeys::kAnonymous).toBool();
+
+    // Update share (shareFolder will handle permission recording for anonymous shares)
+    if (!shareFolder() && !UserShareHelperInstance->isShared(filePath)) {
         shareSwitcher->setChecked(false);
         sharePermissionSelector->setEnabled(false);
         shareAnonymousSelector->setEnabled(false);
         return;
     }
 
+    // Handle transition from anonymous to non-anonymous share
+    bool isNowAnonymous = shareAnonymousSelector->currentIndex() == 1;
+    if (wasAnonymous && !isNowAnonymous) {
+        // Restore directory and home directory permissions
+        AnonymousPermissionManager::instance()->restoreDirectoryPermissions(filePath);
+        AnonymousPermissionManager::instance()->restoreHomeDirectoryIfNoAnonymousShares();
+    }
+    // Note: When transitioning from non-anonymous to anonymous, shareFolder() already handled permission recording
+}
+
+bool ShareControlWidget::shareFolder()
+{
+    if (!shareSwitcher->isChecked()) {
+        fmWarning() << "Share Folder failed, error check state";
+        return false;
+    }
+
+    if (!validateShareName()) {
+        fmWarning() << "Share Folder failed, error folder name";
+        return false;
+    }
+
     bool writable = sharePermissionSelector->currentIndex() == 0;
     bool anonymous = shareAnonymousSelector->currentIndex() == 1;
-    if (anonymous) {   // set the directory's access permission to 777
-        // 1. set the permission of shared folder to 777;
-        DFMIO::DFile file(url);
-        if (file.exists() && writable) {
-            using namespace DFMIO;
-            bool ret = file.setPermissions(file.permissions() | DFile::Permission::kWriteGroup | DFile::Permission::kExeGroup
-                                           | DFile::Permission::kWriteOther | DFile::Permission::kExeOther);
-            if (!ret)
-                fmWarning() << "set permission of " << url << "failed.";
-        }
+    QString filePath = url.toLocalFile();
 
-        // 2. set the mode 'other' of  /home/$USER to r-x when enable anonymous access,
-        // otherwise the anonymous user cannot mount the share successfully.
-        // and never change the mode of /root
+    if (anonymous) {
+        // Set shared directory permissions for anonymous share
+        // This method records original permissions and sets new permissions
+        AnonymousPermissionManager::instance()->setAnonymousPermissions(
+            filePath, AnonymousPermissionManager::DirectoryType::kSharedDirectory, writable);
+
+        // Set home directory permissions for anonymous share
+        // Otherwise anonymous users cannot mount the share successfully
+        // Never modify /root directory permissions
         if (getuid() != 0) {
             QString homePath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
-            DFMIO::DFile home(homePath);
-            if (home.exists()) {
-                using namespace DFMIO;
-                bool ret = home.setPermissions(home.permissions() | DFile::Permission::kReadOther | DFile::Permission::kExeOther);
-                if (!ret)
-                    fmWarning() << "set permission for user home failed: " << homePath;
-            }
+            AnonymousPermissionManager::instance()->setAnonymousPermissions(
+                homePath, AnonymousPermissionManager::DirectoryType::kHomeDirectory);
         }
     }
     ShareInfo info {
@@ -507,16 +532,20 @@ void ShareControlWidget::shareFolder()
         { ShareInfoKeys::kAnonymous, anonymous }
     };
     bool success = UserShareHelperInstance->share(info);
-    if (!success) {
-        shareSwitcher->setChecked(false);
-        sharePermissionSelector->setEnabled(false);
-        shareAnonymousSelector->setEnabled(false);
-    }
+    if (!success)
+        fmWarning() << "share folder failed";
+    return success;
 }
 
-void ShareControlWidget::unshareFolder()
+bool ShareControlWidget::unshareFolder()
 {
-    UserShareHelperInstance->removeShareByPath(url.path());
+    if (shareSwitcher->isChecked()) {
+        fmWarning() << "Unshare Folder failed, error check state";
+        return false;
+    }
+
+    QString filePath = url.toLocalFile();
+    return UserShareHelperInstance->removeShareByPath(filePath);
 }
 
 void ShareControlWidget::updateWidgetStatus(const QString &filePath)
@@ -552,6 +581,8 @@ void ShareControlWidget::updateWidgetStatus(const QString &filePath)
         sharePermissionSelector->setEnabled(false);
         shareAnonymousSelector->setEnabled(false);
     }
+
+    showMoreInfo(valid);
 }
 
 void ShareControlWidget::updateFile(const QUrl &oldOne, const QUrl &newOne)
@@ -564,6 +595,9 @@ void ShareControlWidget::updateFile(const QUrl &oldOne, const QUrl &newOne)
 void ShareControlWidget::onSambaPasswordSet(bool result)
 {
     isSharePasswordSet = result;
+    // BUG: 304479
+    if (shareSwitcher && isSharePasswordSet && !shareSwitcher->isChecked())
+        shareSwitcher->click();
 
     QFont font = sharePassword->font();
     int defaultFontSize = font.pointSize();
@@ -572,6 +606,37 @@ void ShareControlWidget::onSambaPasswordSet(bool result)
     sharePassword->setFixedWidth(isSharePasswordSet ? ConstDef::kWidgetFixedWidth - 140 : ConstDef::kWidgetFixedWidth - 128);
     sharePassword->setText(isSharePasswordSet ? "●●●●●" : tr("None"));
     setPasswordBt->setText(isSharePasswordSet ? tr("Change password") : tr("Set password"));
+}
+
+void ShareControlWidget::onShareNameChanged(const QString &name)
+{
+    static const int kShareNameMaxLen { 150 };
+    QLineEdit *lineEdit = shareNameEditor->lineEdit();
+    const int cursorPos = lineEdit->cursorPosition();
+
+    // Count leading whitespace that trimmed() will strip, so the cursor can be
+    // repositioned correctly after the text is rewritten.
+    int leadingSpaces = 0;
+    while (leadingSpaces < name.size() && name.at(leadingSpaces).isSpace())
+        ++leadingSpaces;
+
+    QString newText = name.trimmed().toLower();
+    bool showAlert = false;
+    while (newText.toLocal8Bit().length() > kShareNameMaxLen) {
+        newText.chop(1);
+        showAlert = true;
+    }
+
+    shareNameEditor->setText(newText);
+    // Keep the cursor right after the just-typed character instead of jumping to
+    // the end, regardless of whether the text was lowercased, trimmed or truncated.
+    const int newCursorPos = qMin(qMax(0, cursorPos - leadingSpaces), newText.size());
+    lineEdit->setCursorPosition(newCursorPos);
+
+    QTimer::singleShot(0, shareNameEditor, [this, showAlert] {
+        if (showAlert)
+            shareNameEditor->showAlertMessage(tr("The shared name is too long and will be truncated."));
+    });
 }
 
 void ShareControlWidget::showMoreInfo(bool showMore)
@@ -588,18 +653,28 @@ void ShareControlWidget::showMoreInfo(bool showMore)
 
 void ShareControlWidget::userShareOperation(bool checked)
 {
-    if (!isSharePasswordSet && checked)
-        showSharePasswordSettingsDialog();
+    if (shareNameEditor->text().trimmed().isEmpty())
+        shareNameEditor->setText(info->displayOf(DisPlayInfoType::kFileDisplayName));
 
-    sharePermissionSelector->setEnabled(checked);
-    shareAnonymousSelector->setEnabled(checked);
+    bool success { false };
+    if (checked) {
+        if (isSharePasswordSet)
+            success = shareFolder();
+        else
+            showSharePasswordSettingsDialog();
+    } else {
+        success = unshareFolder();
+    }
+
+    if (success) {
+        sharePermissionSelector->setEnabled(checked);
+        shareAnonymousSelector->setEnabled(checked);
+    } else {
+        shareSwitcher->setChecked(!checked);
+    }
+
     shareSwitcher->setEnabled(false);
     timer->start();
-    if (checked)
-        this->shareFolder();
-    else
-        this->unshareFolder();
-
     showMoreInfo(checked);
 }
 
@@ -611,13 +686,13 @@ void ShareControlWidget::showSharePasswordSettingsDialog()
     dialog->show();
     dialog->moveToCenter();
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    QObject::connect(dialog, &UserSharePasswordSettingDialog::finished, dialog, &UserSharePasswordSettingDialog::onButtonClicked);
+    QObject::connect(dialog, &UserSharePasswordSettingDialog::buttonClicked, dialog, &UserSharePasswordSettingDialog::onButtonClicked);
     this->setProperty("UserSharePwdSettingDialogShown", true);
     QObject::connect(dialog, &UserSharePasswordSettingDialog::inputPassword, [=](const QString &password) {
         QString userName = UserShareHelperInstance->currentUserName();
         UserShareHelperInstance->setSambaPasswd(userName, password);
     });
-    QObject::connect(dialog, &UserSharePasswordSettingDialog::closed, [=] {
+    QObject::connect(dialog, &UserSharePasswordSettingDialog::closed, this, [this] {
         this->setProperty("UserSharePwdSettingDialogShown", false);
     });
 }

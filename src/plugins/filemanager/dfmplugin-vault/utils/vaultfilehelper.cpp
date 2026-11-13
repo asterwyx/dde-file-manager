@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,8 +40,13 @@ VaultFileHelper::VaultFileHelper(QObject *parent)
 
 bool VaultFileHelper::cutFile(const quint64 windowId, const QList<QUrl> sources, const QUrl target, const AbstractJobHandler::JobFlags flags)
 {
-    if (target.scheme() != scheme())
+    fmDebug() << "Vault: Cut file operation requested, "
+              << "source count:" << sources.size() << "target:" << target.toString();
+
+    if (target.scheme() != scheme()) {
+        fmDebug() << "Vault: Target scheme mismatch, operation cancelled";
         return false;
+    }
 
     QList<QUrl> actualUrls;
     for (const QUrl &url : sources) {
@@ -61,8 +66,13 @@ bool VaultFileHelper::cutFile(const quint64 windowId, const QList<QUrl> sources,
 
 bool VaultFileHelper::copyFile(const quint64 windowId, const QList<QUrl> sources, const QUrl target, const AbstractJobHandler::JobFlags flags)
 {
-    if (target.scheme() != scheme())
+    fmDebug() << "Vault: Copy file operation requested, "
+              << "source count:" << sources.size() << "target:" << target.toString();
+
+    if (target.scheme() != scheme()) {
+        fmDebug() << "Vault: Target scheme mismatch, operation cancelled";
         return false;
+    }
 
     QList<QUrl> actualUrls;
     for (const QUrl &url : sources) {
@@ -98,10 +108,17 @@ bool VaultFileHelper::moveToTrash(const quint64 windowId, const QList<QUrl> sour
 
 bool VaultFileHelper::deleteFile(const quint64 windowId, const QList<QUrl> sources, const AbstractJobHandler::JobFlags flags)
 {
-    if (sources.isEmpty())
+    fmDebug() << "Vault: Delete file operation requested, "
+              << "source count:" << sources.size();
+
+    if (sources.isEmpty()) {
+        fmDebug() << "Vault: Empty sources list, operation cancelled";
         return false;
-    if (sources.first().scheme() != scheme())
+    }
+    if (sources.first().scheme() != scheme()) {
+        fmDebug() << "Vault: Source scheme mismatch, operation cancelled";
         return false;
+    }
 
     DFMBASE_NAMESPACE::AbstractJobHandler::OperatorCallback callback = std::bind(&VaultFileHelper::callBackFunction, this, std::placeholders::_1);
     QList<QUrl> redirectedFileUrls = transUrlsToLocal(sources);
@@ -128,8 +145,13 @@ bool VaultFileHelper::openFileInPlugin(quint64 windowId, const QList<QUrl> urls)
 
 bool VaultFileHelper::renameFile(const quint64 windowId, const QUrl oldUrl, const QUrl newUrl, const AbstractJobHandler::JobFlags flags)
 {
-    if (oldUrl.scheme() != scheme())
+    fmDebug() << "Vault: Rename file operation requested, "
+              << "old URL:" << oldUrl.toString() << "new URL:" << newUrl.toString();
+
+    if (oldUrl.scheme() != scheme()) {
+        fmDebug() << "Vault: Old URL scheme mismatch, operation cancelled";
         return false;
+    }
 
     const QUrl ourl = transUrlsToLocal({ oldUrl }).first();
     const QUrl nurl = transUrlsToLocal({ newUrl }).first();
@@ -310,52 +332,6 @@ bool VaultFileHelper::handleDropFiles(const QList<QUrl> &fromUrls, const QUrl &t
     return true;
 }
 
-bool VaultFileHelper::openFileByApp(const quint64 windowId, const QList<QUrl> urls, const QList<QString> apps)
-{
-    Q_UNUSED(windowId)
-
-    if (urls.isEmpty())
-        return false;
-
-    const QUrl &url = urls.at(0);
-    if (!VaultHelper::isVaultFile(url))
-        return false;
-
-    if (apps.isEmpty())
-        return false;
-
-    const QString &desktopFile = apps.at(0);
-    if (desktopFile.isEmpty())
-        return false;
-
-    DFMBASE_NAMESPACE::DesktopFile d(desktopFile);
-    if (d.desktopExec().contains("dde-file-manager") || d.desktopExec().contains("file-manager.sh")) {
-        int count = urls.size();
-        if (count > 1) {
-            for (int i = 0; i < count; ++i)
-                dpfSignalDispatcher->publish(DFMBASE_NAMESPACE::GlobalEventType::kOpenNewWindow, urls.at(i));
-        } else {
-            if (DFMBASE_NAMESPACE::UniversalUtils::checkLaunchAppInterface()) {
-                QStringList filePathsStr {};
-                for (const auto &url : urls)
-                    filePathsStr << url.toString();
-                DFMBASE_NAMESPACE::UniversalUtils::launchAppByDBus(desktopFile, filePathsStr);
-            } else {
-                dpfSignalDispatcher->publish(DFMBASE_NAMESPACE::GlobalEventType::kOpenNewWindow, urls.at(0));
-            }
-        }
-    } else {
-        QList<QUrl> localUrls;
-        if (VaultHelper::instance()->urlsToLocal(urls, &localUrls)) {
-            dpfSignalDispatcher->publish(DFMBASE_NAMESPACE::GlobalEventType::kOpenFilesByApp, 0, localUrls, apps);
-        } else {
-            fmCritical() << "Vault: the list has no vault url!";
-        }
-    }
-
-    return true;
-}
-
 bool VaultFileHelper::setPermision(const quint64 windowId,
                                    const QUrl url,
                                    const QFileDevice::Permissions permissions,
@@ -393,7 +369,7 @@ void VaultFileHelper::handleFinishedNotify(const JobInfoPointer &jobInfo)
 {
     Q_UNUSED(jobInfo)
 
-    disconnect(qobject_cast<AbstractJobHandler*>(sender()), &AbstractJobHandler::finishedNotify, this, &VaultFileHelper::handleFinishedNotify);
+    disconnect(qobject_cast<AbstractJobHandler *>(sender()), &AbstractJobHandler::finishedNotify, this, &VaultFileHelper::handleFinishedNotify);
     QApplication::restoreOverrideCursor();
 }
 

@@ -4,43 +4,37 @@ project(dfmplugin-emblem)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-FILE(GLOB EMBLEM_FILES
+# Include plugin configuration
+include(DFMPluginConfig)
+
+# 设置二进制文件名
+set(BIN_NAME dfm-emblem-plugin)
+
+FILE(GLOB_RECURSE EMBLEM_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/events/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/events/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.json"
-    )
-find_package(Dtk COMPONENTS Widget REQUIRED)
+)
 
-add_library(${PROJECT_NAME}
+# 创建共享库
+add_library(${BIN_NAME}
     SHARED
     ${EMBLEM_FILES}
 )
 
-set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ../../)
+set_target_properties(${BIN_NAME} PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${DFM_BUILD_PLUGIN_COMMON_DIR})
 
-target_include_directories(${PROJECT_NAME}
-    PUBLIC
-        ${DtkWidget_INCLUDE_DIRS}
-)
+# Use default plugin configuration
+dfm_apply_default_plugin_config(${BIN_NAME})
 
-target_link_libraries(${PROJECT_NAME}
-    DFM::base
-    DFM::framework
-    ${DtkWidget_LIBRARIES}
-)
-
-#install library file
+# 安装库文件
 install(TARGETS
-    ${PROJECT_NAME}
+    ${BIN_NAME}
     LIBRARY
     DESTINATION
-    ${DFM_PLUGIN_COMMON_EDGE_DIR}
+    ${DFM_PLUGIN_COMMON_CORE_DIR}
 )
 
-# install dconfig files.
-include(${CMAKE_SOURCE_DIR}/install_dconfig.cmake)
+# 安装 dconfig 文件
 INSTALL_DCONFIG("org.deepin.dde.file-manager.emblem.json")

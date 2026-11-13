@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -29,15 +29,16 @@ public:
     QString systemPathIconNameByPath(QString path);
     bool isSystemPath(QString path) const;
     bool checkContainsSystemPath(const QList<QUrl> &urlList);
+    QString getRealpathSafely(const QString &path) const;
 
 private:
     explicit SystemPathUtil(QObject *parent = nullptr);
     ~SystemPathUtil();
     void initialize();
     void mkPath(const QString &path);
-    void cleanPath(QString *path) const;
     bool checkContainsSystemPathByFileInfo(const QList<QUrl> &urlList);
     bool checkContainsSystemPathByFileUrl(const QList<QUrl> &urlList);
+    QString findSystemPathKey(const QString &path) const;
 
 public:
     void loadSystemPaths();

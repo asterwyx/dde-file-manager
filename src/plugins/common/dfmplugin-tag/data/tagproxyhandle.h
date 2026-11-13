@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,6 +38,12 @@ public:
     bool deleteFiles(const QVariantMap &value);
     bool deleteFileTags(const QVariantMap &value);
 
+    bool saveTrashFileTags(const QString &originalPath, qint64 inode, const QStringList &tags);
+    QStringList getTrashFileTags(const QString &originalPath, qint64 inode);
+    bool removeTrashFileTags(const QString &originalPath, qint64 inode);
+    bool clearAllTrashTags();
+    QVariantHash getAllTrashFileTags();
+
     bool connectToService();
 
     bool isValid();
@@ -48,6 +54,7 @@ Q_SIGNALS:
     void tagsColorChanged(const QVariantMap &oldAndNew);
     void tagsDeleted(const QStringList &tags);
     void tagsNameChanged(const QVariantMap &oldAndNew);
+    void trashFileTagsChanged();
     void tagServiceRegistered();
 
 private:

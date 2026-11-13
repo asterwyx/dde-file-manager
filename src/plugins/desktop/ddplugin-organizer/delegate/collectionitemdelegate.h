@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,8 @@
 #include "ddplugin_organizer_global.h"
 
 #include <dfm-base/interfaces/fileinfo.h>
+#include <dfm-base/utils/iconcachemanager.h>
+#include <dfm-base/utils/iconpainterutils.h>
 
 #include <QStyledItemDelegate>
 #include <QTextOption>
@@ -23,14 +25,7 @@ class CollectionItemDelegate : public QStyledItemDelegate
     friend class CollectionItemDelegatePrivate;
 
 public:
-    struct PaintIconOpts
-    {
-        QRectF rect;
-        Qt::Alignment alignment { Qt::AlignCenter };
-        QIcon::Mode mode { QIcon::Normal };
-        QIcon::State state { QIcon::Off };
-        bool isThumb { false };
-    };
+    using PaintIconOpts = DFMBASE_NAMESPACE::IconPainterUtils::PaintIconOpts;
 
     explicit CollectionItemDelegate(QAbstractItemView *parentPtr = nullptr);
     ~CollectionItemDelegate() override;
@@ -59,20 +54,16 @@ public:
 
 protected:
     void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override;
-    static QRect paintIcon(QPainter *painter, const QIcon &icon, const PaintIconOpts &opts);
     static QRectF paintEmblems(QPainter *painter, const QRectF &rect, const FileInfoPointer &info);
 
+    void paintBackground(QPainter *painter, const QStyleOptionViewItem &option, const QRect &iconRect) const;
     void paintLabel(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &rLabel) const;
     void drawNormlText(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRectF &rText) const;
     void drawHighlightText(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &rText) const;
     void drawExpandText(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRectF &rect) const;
 
-    static QPixmap getIconPixmap(const QIcon &icon, const QSize &size, qreal pixelRatio,
-                                 QIcon::Mode mode = QIcon::Normal, QIcon::State state = QIcon::Off);
-    static Qt::Alignment visualAlignment(Qt::LayoutDirection direction, Qt::Alignment alignment);
     QList<QRectF> elideTextRect(const QModelIndex &index, const QRect &rect, const Qt::TextElideMode &elideMode) const;
     bool isTransparent(const QModelIndex &index) const;
-    bool isThumnailIconIndex(const QModelIndex &index) const;
 
 public slots:
     void updateItemSizeHint() const;
@@ -87,6 +78,7 @@ public:
     static const int kIconBackRadius;
     static const int kIconRectRadius;
     static const int kIconTopSpacing;
+    static const int kIconBackgroundMargin;
 
 private:
     CollectionItemDelegatePrivate *const d = nullptr;

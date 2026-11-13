@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,13 +10,19 @@
 #include <dfm-base/interfaces/abstractdiriterator.h>
 
 #include <QThread>
+#include <QMutex>
 #include <QUrl>
+#include <atomic>
+#include <functional>
 
 namespace dfmbase {
 
 class TraversalDirThread : public QThread
 {
     Q_OBJECT
+public:
+    using ChildrenSorter = std::function<bool(const QUrl &, const QUrl &)>;
+
 protected:
     QUrl dirUrl;   // 遍历的目录的url
     QSharedPointer<DFMBASE_NAMESPACE::AbstractDirIterator> dirIterator;   // 当前遍历目录的diriterator
@@ -24,7 +30,9 @@ protected:
     QDir::Filters filters;
     QDirIterator::IteratorFlags flags;
     QList<QUrl> childrenList;   // 当前遍历出来的所有文件
-    bool stopFlag = false;
+    std::atomic_bool stopFlag { false };
+    QString fileInfoQueryAttributes;
+    bool enableSort = false;   // 是否启用排序
 
 public:
     explicit TraversalDirThread(const QUrl &url, const QStringList &nameFilters = QStringList(),
@@ -35,6 +43,9 @@ public:
     void stop();
     void quit();
     void stopAndDeleteLater();
+    void setQueryAttributes(const QString &fileAttributes);
+    void setEnableSort(bool enable);
+    bool isSortEnabled() const;
 
 Q_SIGNALS:
     void updateChildren(QList<QUrl> children);

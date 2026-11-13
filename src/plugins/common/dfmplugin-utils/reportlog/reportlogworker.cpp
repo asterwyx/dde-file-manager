@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,6 +13,8 @@
 #include "datas/reportdatainterface.h"
 #include "datas/enterdirreportdata.h"
 #include "datas/desktopstartupreportdata.h"
+
+#include "config.h"
 
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/base/device/private/devicehelper.h>
@@ -33,7 +35,6 @@ DFMBASE_USE_NAMESPACE
 ReportLogWorker::ReportLogWorker(QObject *parent)
     : QObject(parent)
 {
-
 }
 
 ReportLogWorker::~ReportLogWorker()
@@ -45,27 +46,37 @@ ReportLogWorker::~ReportLogWorker()
         logLibrary.unload();
 }
 
-bool ReportLogWorker::init()
+void ReportLogWorker::init()
 {
-    QList<ReportDataInterface *> datas {
-        new BlockMountReportData,
-        new SmbReportData,
-        new SidebarReportData,
-        new SearchReportData,
-        new VaultReportData,
-        new FileMenuReportData,
-        new AppStartupReportData,
-        new EnterDirReportData,
-        new DesktopStartUpReportData
-    };
+    if (logDataObj.isEmpty()) {
+        QList<ReportDataInterface *> datas {
+            new BlockMountReportData,
+            new SmbReportData,
+            new SidebarReportData,
+            new SearchReportData,
+            new VaultReportData,
+            new FileMenuReportData,
+            new AppStartupReportData,
+            new EnterDirReportData,
+            new DesktopStartUpReportData
+        };
 
-    std::for_each(datas.cbegin(), datas.cend(), [this](ReportDataInterface *dat) { registerLogData(dat->type(), dat); });
+        std::for_each(datas.cbegin(), datas.cend(), [this](ReportDataInterface *dat) { registerLogData(dat->type(), dat); });
+    }
+
+    if (!commonData.contains("app_version"))
+        commonData.insert("app_version", VERSION);
+
+    if (writeEventLogFunc)
+        return;
 
     logLibrary.setFileName("deepin-event-log");
-    if (!logLibrary.load()) {
-        fmWarning() << "Report log plugin load log library failed!";
-        return false;
-    } else {
+    if (!logLibrary.isLoaded()) {
+        if (!logLibrary.load()) {
+            fmWarning() << "Report log plugin load log library failed!";
+            return;
+        }
+
         fmInfo() << "Report log plugin load log library success.";
     }
 
@@ -74,15 +85,15 @@ bool ReportLogWorker::init()
 
     if (!initEventLogFunc || !writeEventLogFunc) {
         fmWarning() << "Log library init failed!";
-        return false;
+        writeEventLogFunc = nullptr;
+        return;
     }
 
     if (!initEventLogFunc(QApplication::applicationName().toStdString(), false)) {
         fmWarning() << "Log library init function call failed!";
-        return false;
+        writeEventLogFunc = nullptr;
+        return;
     }
-
-    return true;
 }
 
 void ReportLogWorker::commitLog(const QString &type, const QVariantMap &args)
@@ -234,7 +245,7 @@ bool ReportLogWorker::registerLogData(const QString &type, ReportDataInterface *
 
 void ReportLogWorker::commit(const QVariant &args)
 {
-    if (args.isNull() || !args.isValid())
+    if (!writeEventLogFunc || args.isNull() || !args.isValid())
         return;
     const QJsonObject &dataObj = QJsonObject::fromVariantHash(args.toHash());
     QJsonDocument doc(dataObj);

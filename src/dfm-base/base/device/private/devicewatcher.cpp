@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,8 @@
 #include <dfm-base/base/device/devicemanager.h>
 #include <dfm-base/base/device/deviceutils.h>
 #include <dfm-base/base/device/deviceproxymanager.h>
+#include <dfm-base/base/configs/dconfig/dconfigmanager.h>
+#include <dfm-base/base/configs/dconfig/global_dconf_defines.h>
 #include <dfm-base/dbusservice/global_server_defines.h>
 #include <dfm-base/utils/finallyutil.h>
 
@@ -20,13 +22,22 @@
 #include <dfm-burn/dopticaldiscinfo.h>
 #include <dfm-burn/dopticaldiscmanager.h>
 
+#include <sys/statvfs.h>
+
 using namespace dfmbase;
 DFM_MOUNT_USE_NS
 using namespace GlobalServerDefines;
+using namespace GlobalDConfDefines::ConfigPath;
+
+namespace {
+inline constexpr char kKeyDeviceUsagePollingInterval[] { "deviceUsagePollingInterval" };
+}
 
 DeviceWatcher::DeviceWatcher(QObject *parent)
     : QObject(parent), d(new DeviceWatcherPrivate(this))
 {
+    // 在构造函数中一次性连接定时器信号，避免重复连接
+    connect(&d->pollingTimer, &QTimer::timeout, d.data(), &DeviceWatcherPrivate::queryUsageAsync);
 }
 
 DeviceWatcher::~DeviceWatcher()
@@ -37,26 +48,53 @@ void DeviceWatcher::startPollingUsage()
 {
     if (d->pollingTimer.isActive())
         return;
-    d->queryUsageAsync();
-    connect(&d->pollingTimer, &QTimer::timeout, d.data(), &DeviceWatcherPrivate::queryUsageAsync);
-    d->pollingTimer.start(d->kPollingInterval);
+
+    qCInfo(logDFMBase) << "Starting device usage polling";
+    d->pollingTimer.start(d->pollingInterval);   // 然后启动定时器
 }
 
 void DeviceWatcher::stopPollingUsage()
 {
+    if (!d->pollingTimer.isActive())
+        return;
+
+    qCInfo(logDFMBase) << "Stopping device usage polling";
     d->pollingTimer.stop();
-    disconnect(&d->pollingTimer);
+}
+
+void DeviceWatcher::initUsageCache()
+{
+    // 只在定时器未运行时执行，避免重复查询
+    if (!d->pollingTimer.isActive()) {
+        qCInfo(logDFMBase) << "Initializing device usage cache (one-time query, no timer)";
+        d->queryUsageAsync();
+    }
+}
+
+void DeviceWatcher::refreshUsage()
+{
+    qCInfo(logDFMBase) << "Refreshing device usage on client request";
+    d->queryUsageAsync();
 }
 
 void DeviceWatcherPrivate::queryUsageAsync()
 {
-    QtConcurrent::run([this] {
-        auto blocks = allBlockInfos;
-        auto protocols = allProtocolInfos;
+    qCInfo(logDFMBase) << "Query device usage";
+
+    // Snapshot the device infos on the caller (watcher) thread and never touch
+    // `this` inside the pooled task: the DeviceWatcher may already be destroyed
+    // when the pooled task starts to run (daemon shutdown, unit tests ...), and
+    // reading the member hashes through a dangling `this` caused SIGSEGV.
+    // All mutations of the two hashes below happen on this same thread (slots
+    // are queued connections), so the snapshot itself is race free.
+    const QHash<QString, QVariantMap> blocks = allBlockInfos;
+    const QHash<QString, QVariantMap> protocols = allProtocolInfos;
+
+    QThreadPool::globalInstance()->start([blocks, protocols] {
         std::for_each(blocks.cbegin(), blocks.cend(),
-                      [this](const QVariantMap &item) { queryUsageOfItem(item, DeviceType::kBlockDevice); });
+                      [](const QVariantMap &item) { queryUsageOfItem(item, DeviceType::kBlockDevice); });
         std::for_each(protocols.cbegin(), protocols.cend(),
-                      [this](const QVariantMap &item) { queryUsageOfItem(item, DeviceType::kProtocolDevice); });
+                      [](const QVariantMap &item) { queryUsageOfItem(item, DeviceType::kProtocolDevice); });
     });
 }
 
@@ -80,7 +118,7 @@ void DeviceWatcherPrivate::updateStorage(const QString &id, quint64 total, quint
         update(allProtocolInfos);
 }
 
-void DeviceWatcherPrivate::queryUsageOfItem(const QVariantMap &itemData, dfmmount::DeviceType type)
+void DeviceWatcherPrivate::queryUsageOfItem(const QVariantMap &itemData, DFMMOUNT::DeviceType type)
 {
     const QString &mpt = itemData.value(DeviceProperty::kMountPoint).toString();
     if (mpt.isEmpty())
@@ -100,60 +138,40 @@ void DeviceWatcherPrivate::queryUsageOfItem(const QVariantMap &itemData, dfmmoun
     if (/*old != newStorage && */ newStorage.isValid()) {
         const QString &devId = itemData.value(DeviceProperty::kId).toString();
         emit DevMngIns->devSizeChanged(devId,
-                                       itemData.value(DeviceProperty::kSizeTotal).toULongLong(),
+                                       newStorage.total,
                                        newStorage.avai);
     }
 }
 
 DevStorage DeviceWatcherPrivate::queryUsageOfBlock(const QVariantMap &itemData)
 {
-    if (itemData.value(DeviceProperty::kMountPoint).toString().isEmpty())
+    DevStorage storage;
+    if (!DeviceHelper::queryUsageOfBlockRealTime(itemData, &storage.total, &storage.avai, &storage.used))
         return {};
 
-    if (itemData.value(DeviceProperty::kOpticalDrive).toBool()) {
-        QVariantMap opticalStorage { { DeviceProperty::kDevice, itemData.value(DeviceProperty::kDevice) } };
-        DeviceHelper::readOpticalInfo(opticalStorage);
-        return { opticalStorage.value(DeviceProperty::kSizeTotal).toULongLong(),
-                 opticalStorage.value(DeviceProperty::kSizeFree).toULongLong(),
-                 opticalStorage.value(DeviceProperty::kSizeUsed).toULongLong() };
-    } else {
-        QStorageInfo si(itemData.value(DeviceProperty::kMountPoint).toString());
-        quint64 total = itemData.value(DeviceProperty::kSizeTotal).toULongLong();
-        qint64 avai = si.bytesAvailable();
-        if (avai < 0)   // if nagative value returned, error occured.
-            return {};
-        return { total, static_cast<quint64>(avai), total - avai };
-    }
+    return storage;
 }
 
 DevStorage DeviceWatcherPrivate::queryUsageOfProtocol(const QVariantMap &itemData)
 {
-    if (itemData.value(DeviceProperty::kMountPoint).toString().isEmpty())
+    DevStorage storage;
+    if (!DeviceHelper::queryUsageOfProtocolRealTime(itemData, &storage.total, &storage.avai, &storage.used))
         return {};
 
-    const QString &devId = itemData.value(DeviceProperty::kId).toString();
-    if (devId.isEmpty())
-        return {};
-
-    auto dev = DeviceHelper::createProtocolDevice(devId);
-    if (!dev)
-        return {};
-
-    return { static_cast<quint64>(dev->sizeTotal()),
-             static_cast<quint64>(dev->sizeFree()),
-             static_cast<quint64>(dev->sizeUsage()) };
+    return storage;
 }
 
 void DeviceWatcher::initDevDatas()
 {
-    qCInfo(logDFMBase) << "initDevDatas start";
+    qCInfo(logDFMBase) << "Device data initialization started";
     auto mng { DDeviceManager::instance() };
     const auto &devs { mng->devices() };
     for (const auto &dev : devs.value(DeviceType::kBlockDevice))
         d->allBlockInfos.insert(dev, DeviceHelper::loadBlockInfo(dev));
     for (const auto &dev : devs.value(DeviceType::kProtocolDevice))
         d->allProtocolInfos.insert(dev, DeviceHelper::loadProtocolInfo(dev));
-    qCInfo(logDFMBase) << "initDevDatas end";
+    qCInfo(logDFMBase) << "Device data initialization completed - block devices:"
+                       << d->allBlockInfos.size() << "protocol devices:" << d->allProtocolInfos.size();
 }
 
 /*!
@@ -167,12 +185,14 @@ void DeviceWatcher::initDevDatas()
  */
 void DeviceWatcher::queryOpticalDevUsage(const QString &id)
 {
-    FinallyUtil final([id] { qCInfo(logDFMBase) << "query optical usage finished for" << id; });
+    FinallyUtil final([id] { qCDebug(logDFMBase) << "Optical device usage query completed for device:" << id; });
     Q_UNUSED(final);
 
     QVariantMap data = DeviceHelper::loadBlockInfo(id);
-    if (data.value(DeviceProperty::kId).toString().isEmpty())
+    if (data.value(DeviceProperty::kId).toString().isEmpty()) {
+        qCWarning(logDFMBase) << "Failed to load block info for optical device:" << id;
         return;
+    }
     bool sizeChanged = false;
     QScopedPointer<DFMBURN::DOpticalDiscInfo> info { DFMBURN::DOpticalDiscManager::createOpticalInfo(data.value(DeviceProperty::kDevice).toString()) };
     if (info) {
@@ -197,26 +217,36 @@ void DeviceWatcher::queryOpticalDevUsage(const QString &id)
  */
 void DeviceWatcher::updateOpticalDevUsage(const QString &id, const QString &mpt)
 {
-    FinallyUtil final([id] { qCInfo(logDFMBase) << "update optical usage finished for" << id; });
+    FinallyUtil final([id] { qCDebug(logDFMBase) << "Optical device usage update completed for device:" << id; });
     Q_UNUSED(final);
-    if (mpt.isEmpty())
+    if (mpt.isEmpty()) {
+        qCWarning(logDFMBase) << "Mount point is empty for optical device:" << id;
         return;
+    }
 
     QVariantMap data = DeviceHelper::loadBlockInfo(id);
-    if (data.value(DeviceProperty::kId).toString().isEmpty() || !data.value(DeviceProperty::kOptical).toBool())
+    if (data.value(DeviceProperty::kId).toString().isEmpty() || !data.value(DeviceProperty::kOptical).toBool()) {
+        qCWarning(logDFMBase) << "Invalid optical device data for device:" << id;
         return;
+    }
 
     const QString &mediaType { DeviceUtils::formatOpticalMediaType(data.value(DeviceProperty::kMedia).toString()) };
-    if (mediaType != "DVD+RW" && mediaType != "DVD-RW")
+    if (mediaType != "DVD+RW" && mediaType != "DVD-RW") {
+        qCDebug(logDFMBase) << "Optical device media type not supported for usage update - device:" << id << "type:" << mediaType;
         return;
+    }
 
     const QString &fs { data.value(DeviceProperty::kFileSystem).toString() };
-    if (fs != "udf")
+    if (fs != "udf") {
+        qCDebug(logDFMBase) << "Optical device filesystem not supported for usage update - device:" << id << "filesystem:" << fs;
         return;
+    }
 
     const quint64 freeSize { data.value(DeviceProperty::kSizeFree).toULongLong() };
-    if (freeSize != 0)
+    if (freeSize != 0) {
+        qCDebug(logDFMBase) << "Optical device has free space, no usage update needed - device:" << id << "free size:" << freeSize;
         return;
+    }
 
     // Note: QStorageInfo::bytesTotal is not accurate for DVD-RW
     // TODO(zhangs): For the total capacity of a DVD-RW disc,
@@ -228,6 +258,8 @@ void DeviceWatcher::updateOpticalDevUsage(const QString &id, const QString &mpt)
     qint64 avai = si.bytesAvailable() > 0 ? si.bytesAvailable() : 0;
     data[DeviceProperty::kSizeUsed] = static_cast<quint64>(si.bytesTotal() - avai);
 
+    qCDebug(logDFMBase) << "Optical device usage updated - device:" << id
+                        << "total:" << si.bytesTotal() << "available:" << avai;
     saveOpticalDevUsage(id, data);
 }
 
@@ -241,7 +273,7 @@ void DeviceWatcher::saveOpticalDevUsage(const QString &id, const QVariantMap &da
 void DeviceWatcher::startWatch()
 {
     if (d->isWatching) {
-        qCInfo(logDFMBase) << "watching device changes now...";
+        qCInfo(logDFMBase) << "Device watcher is already monitoring device changes";
         return;
     }
 
@@ -249,7 +281,7 @@ void DeviceWatcher::startWatch()
     mng->startMonitorWatch();
     auto blkMonitor = mng->getRegisteredMonitor(DeviceType::kBlockDevice).objectCast<DBlockMonitor>();
     if (!blkMonitor) {
-        qCWarning(logDFMBase) << "block monitor is not valid!!!";
+        qCCritical(logDFMBase) << "Failed to get block device monitor - device watching cannot start";
     } else {
         auto ptr = blkMonitor.data();
         d->connections << connect(ptr, &DBlockMonitor::driveAdded, DeviceManager::instance(), &DeviceManager::blockDriveAdded);
@@ -265,11 +297,12 @@ void DeviceWatcher::startWatch()
         d->connections << connect(ptr, &DBlockMonitor::propertyChanged, this, &DeviceWatcher::onBlkDevPropertiesChanged);
 
         d->isWatching = true;
+        qCInfo(logDFMBase) << "Block device monitor connected successfully";
     }
 
     auto protoMonitor = mng->getRegisteredMonitor(DeviceType::kProtocolDevice).objectCast<DProtocolMonitor>();
     if (!protoMonitor) {
-        qCWarning(logDFMBase) << "protocol monitor is not valid!!!";
+        qCCritical(logDFMBase) << "Failed to get protocol device monitor - protocol device watching cannot start";
     } else {
         auto ptr = protoMonitor.data();
         d->connections << connect(ptr, &DProtocolMonitor::deviceAdded, this, &DeviceWatcher::onProtoDevAdded);
@@ -278,6 +311,7 @@ void DeviceWatcher::startWatch()
         d->connections << connect(ptr, &DProtocolMonitor::mountRemoved, this, &DeviceWatcher::onProtoDevUnmounted);
 
         d->isWatching = true;
+        qCInfo(logDFMBase) << "Protocol device monitor connected successfully";
     }
 }
 
@@ -292,7 +326,7 @@ void DeviceWatcher::stopWatch()
 
 void DeviceWatcher::onBlkDevAdded(const QString &id)
 {
-    qCDebug(logDFMBase) << "new block device added: " << id;
+    qCInfo(logDFMBase) << "Block device added:" << id;
     auto dev = DeviceHelper::createBlockDevice(id);
     d->allBlockInfos.insert(id, DeviceHelper::loadBlockInfo(dev));
 
@@ -302,7 +336,10 @@ void DeviceWatcher::onBlkDevAdded(const QString &id)
 
 void DeviceWatcher::onBlkDevRemoved(const QString &id)
 {
-    qCDebug(logDFMBase) << "block device removed: " << id;
+    qCInfo(logDFMBase) << "Block device removed:" << id;
+    const QString device = d->allBlockInfos.value(id).value(DeviceProperty::kDevice).toString();
+    if (device.startsWith("/dev/"))
+        DeviceHelper::clearOpticalInfo(device.mid(5));
     QString oldMpt = d->allBlockInfos.value(id).value(DeviceProperty::kMountPoint).toString();
     d->allBlockInfos.remove(id);
     emit DevMngIns->blockDevRemoved(id, oldMpt);
@@ -310,9 +347,12 @@ void DeviceWatcher::onBlkDevRemoved(const QString &id)
 
 void DeviceWatcher::onBlkDevMounted(const QString &id, const QString &mpt)
 {
-    const QVariantMap &info = d->allBlockInfos.value(id);
+    QVariantMap info = d->allBlockInfos.value(id);
     // query info async avoid blocking main thread when disks' IO load is too high.
-    QtConcurrent::run(d.data(), &DeviceWatcherPrivate::queryUsageOfItem, info, DFMMOUNT::DeviceType::kBlockDevice);
+    // `queryUsageOfItem` is stateless (static): passing `d.data()` here kept a raw
+    // pointer to the watcher private alive in the pool and crashed when the
+    // watcher was destroyed before the task ran.
+    QtConcurrent::run(&DeviceWatcherPrivate::queryUsageOfItem, info, DFMMOUNT::DeviceType::kBlockDevice);
     emit DevMngIns->blockDevMounted(id, mpt);
 }
 
@@ -339,15 +379,20 @@ void DeviceWatcher::onBlkDevFsAdded(const QString &id)
 {
     // when a filesystem interface is added, lots of property may changed, so just reload the data
     // this will not happen frequently
-    d->allBlockInfos.insert(id, DeviceHelper::loadBlockInfo(id));
+    auto data = DeviceHelper::loadBlockInfo(id);
+    d->allBlockInfos.insert(id, data);
 
     emit DevMngIns->blockDevFsAdded(id);
-    using namespace GlobalServerDefines;
     emit DevMngIns->blockDevPropertyChanged(id, DeviceProperty::kHasFileSystem, true);
+
+    auto mpt = data.value(DeviceProperty::kMountPoint).toString();
+    if (mpt.isEmpty())
+        DevMngIns->doAutoMount(id, DeviceType::kBlockDevice);
 }
 
 void DeviceWatcher::onBlkDevFsRemoved(const QString &id)
 {
+    const auto oldData = d->allBlockInfos.value(id);
     auto data = DeviceHelper::loadBlockInfo(id);
     // when a filesystem interface is added, lots of property may changed, so just reload the data
     // this will not happen frequently
@@ -356,8 +401,10 @@ void DeviceWatcher::onBlkDevFsRemoved(const QString &id)
     else
         d->allBlockInfos.remove(id);
 
+    auto oldMpt = oldData.value(DeviceProperty::kMountPoint).toString();
+    if (!oldMpt.isEmpty())
+        emit DevMngIns->blockDevUnmounted(id, oldMpt);
     emit DevMngIns->blockDevFsRemoved(id);
-    using namespace GlobalServerDefines;
     emit DevMngIns->blockDevPropertyChanged(id, DeviceProperty::kHasFileSystem, false);
 }
 
@@ -368,8 +415,7 @@ void DeviceWatcher::onBlkDevPropertiesChanged(const QString &id, const QMap<Prop
         const auto &var = iter.value();
         auto name = DeviceHelper::castFromDFMMountProperty(property);
         if (name.isEmpty()) {
-            qCInfo(logDFMBase) << Utils::getNameByProperty(property) << "has no mapped device name";
-            qCInfo(logDFMBase) << "changed value is: " << var;
+            qCDebug(logDFMBase) << "Property has no mapped device name - property:" << Utils::getNameByProperty(property) << "value:" << var;
             continue;
         } else {
             QVariantMap &item = d->allBlockInfos[id];
@@ -381,12 +427,14 @@ void DeviceWatcher::onBlkDevPropertiesChanged(const QString &id, const QMap<Prop
             if (name == DeviceProperty::kMountPoints)
                 item[DeviceProperty::kMountPoint] = var.toStringList().isEmpty() ? item[DeviceProperty::kMountPoint] : var.toStringList().first();
             if (name == DeviceProperty::kOptical && !var.toBool()) {
+                DeviceHelper::clearOpticalInfo(item.value(DeviceProperty::kDevice).toString().mid(5));
                 item[DeviceProperty::kOpticalMediaType] = "";
                 item[DeviceProperty::kOpticalWriteSpeed] = QStringList();
                 item[DeviceProperty::kSizeTotal] = 0;
                 item[DeviceProperty::kSizeFree] = 0;
                 item[DeviceProperty::kSizeUsed] = 0;
                 DeviceHelper::persistentOpticalInfo(item);
+                qCDebug(logDFMBase) << "Optical device properties cleared for device:" << id;
             }
             emit DevMngIns->blockDevPropertyChanged(id, name, var);
         }
@@ -395,7 +443,7 @@ void DeviceWatcher::onBlkDevPropertiesChanged(const QString &id, const QMap<Prop
 
 void DeviceWatcher::onProtoDevAdded(const QString &id)
 {
-    qCDebug(logDFMBase) << "new protocol device added: " << id;
+    qCInfo(logDFMBase) << "Protocol device added:" << id;
     d->allProtocolInfos.insert(id, DeviceHelper::loadProtocolInfo(id));
 
     emit DevMngIns->protocolDevAdded(id);
@@ -404,7 +452,7 @@ void DeviceWatcher::onProtoDevAdded(const QString &id)
 
 void DeviceWatcher::onProtoDevRemoved(const QString &id)
 {
-    qCDebug(logDFMBase) << "protocol device removed: " << id;
+    qCInfo(logDFMBase) << "Protocol device removed:" << id;
     QString oldMpt = d->allProtocolInfos.value(id).value(DeviceProperty::kMountPoint).toString();
     d->allProtocolInfos.remove(id);
 
@@ -495,4 +543,34 @@ DeviceWatcherPrivate::DeviceWatcherPrivate(DeviceWatcher *qq)
     : QObject(qq), q(qq)
 {
     connect(DevProxyMng, &DeviceProxyManager::devSizeChanged, this, &DeviceWatcherPrivate::updateStorage, Qt::QueuedConnection);
+    DConfigManager::instance()->addConfig(kMountDConfName);
+
+    // 读取 DConfig 配置的轮询间隔
+    int cfgInterval = DConfigManager::instance()->value(kMountDConfName, kKeyDeviceUsagePollingInterval, 10).toInt();
+    // 配置单位为秒，转换为毫秒，并确保不小于最小值
+    pollingInterval = qMax(cfgInterval * 1000, kMinPollingInterval);
+    qCInfo(logDFMBase) << "Device usage polling interval set to" << pollingInterval << "ms";
+
+    // 监听配置变化
+    connect(DConfigManager::instance(), &DConfigManager::valueChanged, this, [this](const QString &config, const QString &key) {
+        if (config == kMountDConfName && key == kKeyDeviceUsagePollingInterval) {
+            onPollingIntervalChanged();
+        }
+    });
+}
+
+void DeviceWatcherPrivate::onPollingIntervalChanged()
+{
+    int cfgInterval = DConfigManager::instance()->value(kMountDConfName, kKeyDeviceUsagePollingInterval, 10).toInt();
+    int newInterval = qMax(cfgInterval * 1000, kMinPollingInterval);
+
+    if (newInterval != pollingInterval) {
+        pollingInterval = newInterval;
+        qCInfo(logDFMBase) << "Device usage polling interval changed to" << pollingInterval << "ms";
+
+        // 如果定时器正在运行，则更新间隔
+        if (pollingTimer.isActive()) {
+            pollingTimer.setInterval(pollingInterval);
+        }
+    }
 }

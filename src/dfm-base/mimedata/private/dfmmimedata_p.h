@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,7 +22,11 @@ public:
     void parseUrls(const QList<QUrl> &urls);
 
 public:
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     QVariantMap attributes;
+#else
+    QMultiMap<QString, QVariant> attributes;
+#endif
     QString version;
 
     QList<QUrl> urlList;

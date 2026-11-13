@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -31,7 +31,7 @@ class SyncFileInfoPrivate
 public:
     SyncFileInfo *const q;
     FileInfo::FileType fileType { FileInfo::FileType::kUnknown };   // 缓存文件的FileType
-    DFileInfo::MediaType mediaType { DFileInfo::MediaType::kGeneral};
+    DFileInfo::MediaType mediaType { DFileInfo::MediaType::kGeneral };
     DMimeDatabase mimeDb;
     QMimeDatabase::MatchMode mimeTypeMode;
     QSharedPointer<DFileInfo> dfmFileInfo { nullptr };   // dfm文件的信息
@@ -39,41 +39,23 @@ public:
     QMap<DFileInfo::AttributeExtendID, QVariant> attributesExtend;   // 缓存的fileinfo 扩展信息
     QList<DFileInfo::AttributeExtendID> extendIDs;
     QMimeType mimeType;
-    QReadWriteLock lock;
-    QMutex mutex;
-    QReadWriteLock iconLock;
+    mutable QMutex lock;
+    mutable QReadWriteLock iconLock;
     QIcon fileIcon;
     QVariant isLocalDevice = true;
     QVariant isCdRomDevice;
     QSharedPointer<InfoDataFuture> mediaFuture { nullptr };
     InfoHelperUeserDataPointer fileMimeTypeFuture { nullptr };
     QMap<DFMIO::DFileInfo::AttributeID, QVariant> cacheAttributes;
+    mutable QString fileIconName;
 
 public:
     explicit SyncFileInfoPrivate(SyncFileInfo *qq);
     virtual ~SyncFileInfoPrivate();
-    QString sizeString(const QString &str) const
-    {
-        int begin_pos = str.indexOf('.');
-
-        if (begin_pos < 0)
-            return str;
-
-        QString size = str;
-
-        while (size.count() - 1 > begin_pos) {
-            if (!size.endsWith('0'))
-                return size;
-
-            size = size.left(size.count() - 1);
-        }
-
-        return size.left(size.count() - 1);
-    }
-    virtual QMimeType readMimeType(QMimeDatabase::MatchMode mode = QMimeDatabase::MatchDefault) const;
 
 public:
     QString fileName() const;
+    QString baseName() const;
     QString completeBaseName() const;
     QString completeSuffix() const;
     QString iconName() const;
@@ -84,7 +66,6 @@ public:
     QString symLinkTarget() const;
     QUrl redirectedFileUrl() const;
     bool isExecutable() const;
-    bool isPrivate() const;
     bool canDelete() const;
     bool canTrash() const;
     bool canRename() const;

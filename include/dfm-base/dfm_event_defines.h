@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -53,6 +53,7 @@ enum GlobalEventType {
     kCleanTrash,
     kWriteCustomToClipboard,
     kHideFiles,
+    kCopyFilePath,
 
     // file operations finieshed!
     kOpenFilesResult = 1000,

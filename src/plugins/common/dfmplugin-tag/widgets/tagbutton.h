@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -48,7 +48,11 @@ signals:
     void checkedChanged();
 
 protected:
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     virtual void enterEvent(QEvent *event) override;
+#else
+    virtual void enterEvent(QEnterEvent *event) override;
+#endif
     virtual void leaveEvent(QEvent *event) override;
     virtual void mousePressEvent(QMouseEvent *event) override;
     virtual void mouseReleaseEvent(QMouseEvent *event) override;

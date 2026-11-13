@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -33,7 +33,7 @@ public:
     QUrl touchFile(const QUrl &url, const QUrl &tempUrl = QUrl());
     bool mkdir(const QUrl &dir);
     bool rmdir(const QUrl &url);
-    bool renameFile(const QUrl &url, const QUrl &newUrl, const bool needCheck = true);
+    bool renameFile(const QUrl &url, const QUrl &newUrl, const bool needCheck);
     bool openFile(const QUrl &file);
     bool openFiles(const QList<QUrl> &files);
     bool openFileByApp(const QUrl &file, const QString &appDesktop);
@@ -47,7 +47,6 @@ public:
     bool deleteFile(const QUrl &url);
     bool deleteFileRecursive(const QUrl &url);
     bool setFileTime(const QUrl &url, const QDateTime &accessDateTime, const QDateTime &lastModifiedTime);
-
     bool renameFilesBatch(const QMap<QUrl, QUrl> &urls, QMap<QUrl, QUrl> &successUrls);
     bool doHiddenFileRemind(const QString &name, bool *checkRule = nullptr);
 
@@ -55,6 +54,8 @@ public:
     GlobalEventType lastEventType();
     QString errorString();
     DFMIOErrorCode errorCode();
+    QList<QUrl> getInvalidPath();
+    QList<QUrl> getNetworkUnreachablePath();
 
 private:
     QScopedPointer<LocalFileHandlerPrivate> d;

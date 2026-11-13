@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,8 +8,6 @@
 #include "dfmplugin_vault_global.h"
 
 #include <dtkwidget_global.h>
-
-#include <polkit-qt5-1/PolkitQt1/Authority>
 
 #include <QWidget>
 
@@ -21,6 +19,8 @@ class DPasswordEdit;
 class DToolTip;
 class DFloatingWidget;
 class DLabel;
+class DSpinner;
+class DCommandLinkButton;
 DWIDGET_END_NAMESPACE
 
 namespace dfmplugin_vault {
@@ -46,21 +46,19 @@ public:
 
 public Q_SLOTS:
     void onPasswordChanged(const QString &password);
-    void slotCheckAuthorizationFinished(PolkitQt1::Authority::Result result);
+    void slotCheckAuthorizationFinished(bool result);
 
 Q_SIGNALS:
     void signalJump(const RemoveWidgetType &type);
     void sigCloseDialog();
-
-protected:
-    bool eventFilter(QObject *obj, QEvent *evt) override;
 
 private:
     DTK_WIDGET_NAMESPACE::DPasswordEdit *pwdEdit { nullptr };
     QPushButton *tipsBtn { nullptr };
     DTK_WIDGET_NAMESPACE::DToolTip *tooltip { nullptr };
     DTK_WIDGET_NAMESPACE::DFloatingWidget *floatWidget { nullptr };
-    DTK_WIDGET_NAMESPACE::DLabel *keyDeleteLabel { Q_NULLPTR };
+    DTK_WIDGET_NAMESPACE::DCommandLinkButton *toggleModeBtn { Q_NULLPTR };
+    DTK_WIDGET_NAMESPACE::DSpinner *spinner { nullptr };
 };
 }
 #endif   // VAULTREMOVEBYPASSWORDVIEW_H

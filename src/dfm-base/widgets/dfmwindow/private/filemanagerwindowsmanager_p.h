@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -31,6 +31,7 @@ private:
     QHash<quint64, DFMBASE_NAMESPACE::FileManagerWindow *> windows;
     FileManagerWindowsManager::WindowCreator customCreator {};
     quint64 previousActivedWindowId = 0;
+    QList<quint64> lastActivedWindowIdList;
 };
 
 DFMBASE_END_NAMESPACE

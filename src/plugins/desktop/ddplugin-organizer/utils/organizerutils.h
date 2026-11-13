@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,9 +13,11 @@ class OrganizerUtils
 {
 public:
     static bool isAllItemCategory(const ItemCategories &flags);
+    static ItemCategories buildBitwiseEnabledCategory(const ItemCategories &flags);
+
 private:
     OrganizerUtils();
 };
 
 }
-#endif // ORGANIZERUTILS_H
+#endif   // ORGANIZERUTILS_H

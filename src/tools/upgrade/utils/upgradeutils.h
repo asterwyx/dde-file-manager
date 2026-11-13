@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,6 +10,7 @@
 namespace dfm_upgrade {
 namespace UpgradeUtils {
 QVariant genericAttribute(const QString &key);
+void addOldGenericAttribute(const QJsonArray &array);
 QVariant applicationAttribute(const QString &key);
 bool backupFile(const QString &sourceFile, const QString &backupDirPath);
 }

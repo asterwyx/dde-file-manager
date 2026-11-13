@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,19 +22,22 @@ using namespace dfmplugin_vault;
 BasicWidget::BasicWidget(QWidget *parent)
     : DArrowLineDrawer(parent)
 {
+    fmDebug() << "Vault: Creating basic property widget";
     initUI();
-    fileCalculationUtils = new FileStatisticsJob;
-    connect(fileCalculationUtils, &FileStatisticsJob::dataNotify, this, &BasicWidget::slotFileCountAndSizeChange);
+    fileCalculationUtils = new FileScanner;
+    connect(fileCalculationUtils, &FileScanner::progressChanged, this, &BasicWidget::slotFileCountAndSizeChange);
 }
 
 BasicWidget::~BasicWidget()
 {
+    fmDebug() << "Vault: Destroying basic property widget";
     fileCalculationUtils->stop();
     fileCalculationUtils->deleteLater();
 }
 
 void BasicWidget::initUI()
 {
+    fmDebug() << "Vault: Initializing basic property widget UI";
     setExpandedSeparatorVisible(false);
     setSeparatorVisible(false);
 
@@ -87,7 +90,7 @@ void BasicWidget::initUI()
     fileModified->rightWidget()->setMaximumHeight(kMaximumHeight);
 
     QGridLayout *gl = new QGridLayout;
-    gl->setMargin(0);
+    gl->setContentsMargins(0, 0, 0, 0);
     gl->setColumnStretch(0, 1);
     gl->setColumnStretch(1, 1);
     gl->setColumnStretch(2, 2);
@@ -155,12 +158,12 @@ int BasicWidget::getFileCount()
     return fCount;
 }
 
-void BasicWidget::slotFileCountAndSizeChange(qint64 size, int filesCount, int directoryCount)
+void BasicWidget::slotFileCountAndSizeChange(const DFMBASE_NAMESPACE::FileScanner::ScanResult &result)
 {
-    fSize = size;
-    fileSize->setRightValue(FileUtils::formatSize(size));
+    fSize = result.totalSize;
+    fileSize->setRightValue(FileUtils::formatSize(result.totalSize));
 
-    fCount = filesCount + (directoryCount > 1 ? directoryCount - 1 : 0);
+    fCount = result.fileCount + result.directoryCount;
     fileCount->setRightValue(QString::number(fCount));
 }
 

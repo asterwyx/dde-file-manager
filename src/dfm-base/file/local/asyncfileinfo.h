@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -63,8 +63,9 @@ public:
     void setNotifyUrl(const QUrl &url, const QString &infoPtr);
     void removeNotifyUrl(const QUrl &url, const QString &infoPtr);
     // less 0,cache fialed, equeal 0,another cache, bigger 0 cache success
-    int cacheAsyncAttributes();
+    int cacheAsyncAttributes(const QString &attributes = QString());
     bool asyncQueryDfmFileInfo(int ioPriority = 0, initQuerierAsyncCallback func = nullptr, void *userData = nullptr);
+    int errorCodeFromDfmio() const;
 };
 }
 typedef QSharedPointer<DFMBASE_NAMESPACE::AsyncFileInfo> DFMAsyncFileInfoPointer;

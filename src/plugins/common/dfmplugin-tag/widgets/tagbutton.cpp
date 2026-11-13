@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -66,7 +66,11 @@ QColor TagButton::color() const
     return tagColor;
 }
 
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 void TagButton::enterEvent(QEvent *event)
+#else
+void TagButton::enterEvent(QEnterEvent *event)
+#endif
 {
     if (!isChecked()) {
         setPaintStatus(PaintStatus::kHover);

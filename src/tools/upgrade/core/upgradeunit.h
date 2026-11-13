@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,7 @@
 #define UPGRADEUNIT_H
 
 #include <QMap>
+#include <QString>
 
 namespace dfm_upgrade {
 
@@ -18,6 +19,10 @@ public:
     virtual bool initialize(const QMap<QString, QString> &args) = 0;
     virtual bool upgrade() = 0;
     virtual void completed();
+
+protected:
+    QString configurationPath;
+    QString backupDirPath;
 };
 
 }

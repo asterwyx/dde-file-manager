@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,9 +17,17 @@
 #include <dfm-base/utils/windowutils.h>
 #include <dfm-base/widgets/filemanagerwindowsmanager.h>
 #include <dfm-base/utils/fileutils.h>
+#include <dfm-base/utils/iconutils.h>
+
+#include <DBackgroundGroup>
+#include <DTreeView>
+#include <DToolTip>
 
 #include <QDir>
 #include <QApplication>
+#include <QTimer>
+#include <QHeaderView>
+#include <QStandardItemModel>
 
 using namespace dfmbase;
 
@@ -27,6 +35,7 @@ static const QString kUserTrashFullOpened = "user-trash-full-opened";
 
 DialogManager *DialogManager::instance()
 {
+    Q_ASSERT(qApp->thread() == QThread::currentThread());
     static DialogManager ins;
     return &ins;
 }
@@ -38,7 +47,7 @@ DDialog *DialogManager::showQueryScanningDialog(const QString &title)
     d->setAttribute(Qt::WA_DeleteOnClose);
     Qt::WindowFlags flags = d->windowFlags();
     d->setWindowFlags(flags | Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint);
-    d->setIcon(warningIcon);
+    d->setIcon(QIcon::fromTheme("dde-file-manager"));
     d->addButton(QObject::tr("Cancel", "button"));
     d->addButton(QObject::tr("Stop", "button"), true, DDialog::ButtonWarning);   // 终止
     d->setMaximumWidth(640);
@@ -52,13 +61,13 @@ void DialogManager::showErrorDialog(const QString &title, const QString &message
     Qt::WindowFlags flags = d.windowFlags();
     // dialog show top
     d.setWindowFlags(flags | Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint);
-    d.setIcon(errorIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     d.addButton(tr("Confirm", "button"), true, DDialog::ButtonNormal);
     d.setMaximumWidth(640);
     d.exec();
 }
 
-int DialogManager::showMessageDialog(DialogManager::MessageType messageLevel, const QString &title, const QString &message, QString btnTxt)
+int DialogManager::showMessageDialog(const QString &title, const QString &message, QString btnTxt)
 {
     DDialog d(title, message, qApp->activeWindow());
     d.moveToCenter();
@@ -66,13 +75,18 @@ int DialogManager::showMessageDialog(DialogManager::MessageType messageLevel, co
     buttonTexts.append(btnTxt);
     d.addButtons(buttonTexts);
     d.setDefaultButton(0);
-    if (messageLevel == kMsgWarn) {
-        d.setIcon(warningIcon);
-    } else if (messageLevel == kMsgErr) {
-        d.setIcon(errorIcon);
-    } else {
-        d.setIcon(infoIcon);
-    }
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
+    int code = d.exec();
+    return code;
+}
+
+int DialogManager::showMessageDialog(const QString &title, const QString &message, const QStringList &btnTxtList)
+{
+    DDialog d(title, message, qApp->activeWindow());
+    d.moveToCenter();
+    d.addButtons(btnTxtList);
+    d.setDefaultButton(btnTxtList.size() - 1);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     int code = d.exec();
     return code;
 }
@@ -149,19 +163,25 @@ void DialogManager::showErrorDialogWhenOperateDeviceFailed(OperateType type, DFM
             errMsg = tr("Permission denied");
         else if (static_cast<int>(err.code) == ENOENT)
             errMsg = tr("No such file or directory");
-        else if (err.code >= DeviceError::kGIOError
-                 && err.code <= DeviceError::kGIOErrorMessageTooLarge)
+        else if (err.code == DeviceError::kUserErrorFailed
+                 || (err.code >= DeviceError::kGIOError
+                     && err.code <= DeviceError::kGIOErrorMessageTooLarge))
             errMsg = err.message;
         else
-            errMsg = tr("Error occured while mounting device");
+            errMsg = tr("Error occurred while mounting device");
 
         if (err.message.contains("Operation not permitted.")) {   // TASK(222725)
             errMsg = tr("The device has been blocked and you do not have permission to access it. "
                         "Please configure its connection policy in Security Center or contact your administrator.");
         }
     } else if (type == OperateType::kRemove || type == OperateType::kUnmount) {
-        title = kUnmountFailed;
-        errMsg = tr("The device is busy, cannot remove now");
+        if (err.code == DeviceError::kUserErrorAuthenticationFailed) {
+            title.clear();
+            errMsg.clear();
+        } else {
+            title = kUnmountFailed;
+            errMsg = tr("The device is busy, cannot remove now");
+        }
     }
 
     if (!errMsg.isEmpty())
@@ -191,13 +211,13 @@ void DialogManager::showNoPermissionDialog(const QList<QUrl> &urls)
         }
 
         d.setMessage(message);
-        d.setIcon(warningIcon);
+        d.setIcon(QIcon::fromTheme("dde-file-manager"));
     } else {
 
         QFrame *contentFrame = new QFrame;
 
         QLabel *iconLabel = new QLabel;
-        iconLabel->setPixmap(warningIcon.pixmap(64, 64));
+        iconLabel->setPixmap(IconUtils::hiDpiPixmap(QIcon::fromTheme("dde-file-manager"), QSize(64, 64), qApp->activeWindow()));
 
         QLabel *titleLabel = new QLabel;
         titleLabel->setText(tr("Sorry, you don't have permission to operate the following %1 file/folder(s)!").arg(QString::number(urls.count())));
@@ -242,7 +262,7 @@ void DialogManager::showCopyMoveToSelfDialog()
     buttonTexts.append(tr("OK", "button"));
     d.addButton(buttonTexts[0], true, DDialog::ButtonNormal);
     d.setDefaultButton(0);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     d.exec();
 }
 
@@ -259,17 +279,56 @@ void DialogManager::addTask(const JobHandlePointer task)
     taskdialog->addTask(task);
 }
 
+void DialogManager::registerSettingWidget(const QString &viewType,
+                                          std::function<DSettingsWidgetFactory::WidgetCreateHandler> handler)
+{
+    settingWidgetCreators[viewType] = handler;
+}
+
 void DialogManager::showSetingsDialog(FileManagerWindow *window)
 {
-    Q_ASSERT(window);
+    showSetingsDialog(window, QString());
+}
 
-    if (window->property("isSettingDialogShown").toBool()) {
-        qCWarning(logDFMBase) << "isSettingDialogShown true";
+void DialogManager::showSetingsDialog(FileManagerWindow *window, const QString &groupKey)
+{
+    if (!window) {
+        qCWarning(logDFMBase) << "showSetingsDialog: window is null";
         return;
     }
+
+    if (window->property("isSettingDialogShown").toBool()) {
+        // The settings dialog is already open for this window: bring it to the
+        // front instead of silently ignoring the repeated request.
+        if (auto *dsd = window->findChild<DSettingsDialog *>()) {
+            dsd->show();
+            dsd->raise();
+            dsd->activateWindow();
+        }
+        return;
+    }
+
     window->setProperty("isSettingDialogShown", true);
-    DSettingsDialog *dsd = new SettingDialog(window);
+    SettingDialog *dsd = new SettingDialog(window);
+
+    // 在初始化前注册所有缓存的自定义控件创建器
+    auto factory = dsd->widgetFactory();
+    for (auto iter = settingWidgetCreators.constBegin();
+         iter != settingWidgetCreators.constEnd();
+         ++iter) {
+        factory->registerWidget(iter.key(), iter.value());
+    }
+
+    dsd->initialze();
     dsd->show();
+
+    // 仅在指定有效分组时滚动到对应设置分组。
+    if (!groupKey.isEmpty()) {
+        QTimer::singleShot(0, dsd, [dsd, groupKey]() {
+            dsd->scrollToGroup(groupKey);
+        });
+    }
+
     connect(dsd, &DSettingsDialog::finished, [window] {
         window->setProperty("isSettingDialogShown", false);
     });
@@ -288,7 +347,7 @@ QString DialogManager::askPasswordForLockedDevice(const QString &devName)
 bool DialogManager::askForFormat()
 {
     DDialog dlg(qApp->activeWindow());
-    dlg.setIcon(warningIcon);
+    dlg.setIcon(QIcon::fromTheme("dde-file-manager"));
     dlg.addButton(tr("Cancel", "button"));
     dlg.addButton(tr("Format", "button"), true, DDialog::ButtonRecommend);
     dlg.setTitle(tr("To access the device, you must format the disk first. Are you sure you want to format it now?"));
@@ -365,7 +424,7 @@ int DialogManager::showDeleteFilesDialog(const QList<QUrl> &urlList, bool isTras
     QString title;
     QString fileName;
     QIcon icon(QIcon::fromTheme(kUserTrashFullOpened));
-    bool isLocalFile = dfmbase::FileUtils::isLocalFile(urlList.first());
+    bool isLocalFile = urlList.first().isLocalFile();
     if (isLocalFile) {
         if (urlList.size() == 1) {
             SyncFileInfo f(urlList.first());
@@ -377,7 +436,18 @@ int DialogManager::showDeleteFilesDialog(const QList<QUrl> &urlList, bool isTras
         title = DeleteFileItems.arg(urlList.size());
     }
 
-    DDialog d(qApp->activeWindow());
+    // Don't parent the stack-allocated dialog to a window that may be destroyed
+    // during this dialog's own nested event loop. A WA_DeleteOnClose transient
+    // popup (e.g. TagEditor) closes and deleteLater()-destroys itself once it
+    // loses focus to this dialog; the deferred delete is processed inside
+    // d.exec(), and ~TagEditor -> deleteChildren would then `delete` this
+    // stack object, causing a double-free / corruption crash. Fall back to the
+    // parentless WindowStaysOnTopHint branch below for such windows.
+    QWidget *parent = qApp->activeWindow();
+    if (parent && parent->testAttribute(Qt::WA_DeleteOnClose))
+        parent = nullptr;
+
+    DDialog d(parent);
     if (!d.parentWidget()) {
         d.setWindowFlags(d.windowFlags() | Qt::WindowStaysOnTopHint);
     }
@@ -450,13 +520,14 @@ int DialogManager::showNormalDeleteConfirmDialog(const QList<QUrl> &urls)
     }
 
     QFontMetrics fm(d.font());
-    d.setIcon(QIcon::fromTheme("user-trash-full-opened"));
+    const auto &icon = FileUtils::trashIsEmpty() ? QIcon::fromTheme("user-trash") : QIcon::fromTheme("user-trash-full");
+    d.setIcon(icon);
 
     QString deleteFileName = tr("Do you want to delete %1?");
     QString deleteFileItems = tr("Do you want to delete the selected %1 items?");
 
     const QUrl &urlFirst = urls.first();
-    if (dfmbase::FileUtils::isLocalFile(urlFirst)) {   // delete local file
+    if (urlFirst.isLocalFile()) {   // delete local file
         if (urls.size() == 1) {
             FileInfoPointer info = InfoFactory::create<FileInfo>(urlFirst);
             d.setTitle(deleteFileName.arg(fm.elidedText(info->displayOf(DisPlayInfoType::kFileDisplayName), Qt::ElideMiddle, NAME_MAX)));
@@ -488,7 +559,92 @@ void DialogManager::showRestoreFailedDialog(const int count)
     } else if (count > 1) {
         d.setMessage(tr("Failed to restore %1 files, the target folder is read-only").arg(QString::number(count)));
     }
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
+    d.addButton(tr("OK", "button"), true, DDialog::ButtonNormal);
+    d.exec();
+}
+
+void DialogManager::showOperationFailedDialog(const QMap<QUrl, QString> &failedInfo)
+{
+    DDialog d(qApp->activeWindow());
+    d.setTitle(tr("Operation failed!"));
+
+    if (failedInfo.size() == 1) {
+        d.setMessage(tr("File operation failed: %1").arg(failedInfo.first()));
+    } else if (failedInfo.size() > 1) {
+        QWidget *contentWidget = new QWidget(&d);
+        QVBoxLayout *mainLayout = new QVBoxLayout(contentWidget);
+        mainLayout->setContentsMargins(0, 0, 0, 0);
+        mainLayout->setSpacing(10);
+
+        // Clickable message label with details link
+        QLabel *messageLabel = new QLabel(contentWidget);
+        auto updateDetailsLink = [messageLabel, count = failedInfo.size()](bool showViewLink) {
+            QString linkText = showViewLink ? QObject::tr("View details") : QObject::tr("Hide details");
+            QString link = QString("<a href=\"#\" style=\"text-decoration:none;\">%1</a>").arg(linkText);
+            messageLabel->setText(QObject::tr("Failed to operate on %1 files, %2").arg(count).arg(link));
+        };
+        updateDetailsLink(true);
+        messageLabel->setTextFormat(Qt::RichText);
+        messageLabel->setOpenExternalLinks(false);
+        messageLabel->setAlignment(Qt::AlignCenter);
+        mainLayout->addWidget(messageLabel);
+
+        // Details container
+        QVBoxLayout *detailsLayout = new QVBoxLayout;
+        detailsLayout->setContentsMargins(4, 0, 4, 0);
+        DBackgroundGroup *detailsContainer = new DBackgroundGroup(detailsLayout, &d);
+        detailsContainer->setVisible(false);
+
+        // Error details tree view
+        DTreeView *detailsView = new DTreeView(contentWidget);
+        QStandardItemModel *model = new QStandardItemModel(detailsView);
+        model->setHorizontalHeaderLabels(QStringList() << tr("File Name") << tr("Error Reason"));
+        detailsView->setModel(model);
+        detailsView->setRootIsDecorated(false);
+        detailsView->setIconSize({ 16, 16 });
+        detailsView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        detailsView->setSelectionMode(QAbstractItemView::NoSelection);
+        detailsView->setAlternatingRowColors(true);
+        detailsView->header()->setSectionResizeMode(QHeaderView::Stretch);
+        detailsView->setFrameShape(QFrame::NoFrame);
+        detailsView->setTextElideMode(Qt::ElideMiddle);
+
+        // Populate error details
+        for (auto it = failedInfo.constBegin(); it != failedInfo.constEnd(); ++it) {
+            FileInfoPointer info = InfoFactory::create<FileInfo>(it.key());
+            QString fileName = info ? info->displayOf(DisPlayInfoType::kFileDisplayName) : it.key().fileName();
+            QIcon fileIcon = info ? info->fileIcon() : QIcon::fromTheme("text-plain");
+
+            QStandardItem *fileItem = new QStandardItem(fileIcon, fileName);
+            fileItem->setToolTip(DToolTip::wrapToolTipText(fileName, { Qt::AlignLeft }));
+
+            QStandardItem *errorItem = new QStandardItem(it.value());
+            errorItem->setToolTip(DToolTip::wrapToolTipText(it.value(), { Qt::AlignLeft }));
+
+            model->appendRow({ fileItem, errorItem });
+        }
+
+        detailsLayout->addWidget(detailsView);
+        mainLayout->addWidget(detailsContainer);
+
+        // Toggle details visibility on link click
+        connect(messageLabel, &QLabel::linkActivated, [=, &d]() {
+            bool isVisible = detailsContainer->isVisible();
+            if (isVisible) {
+                d.setMaximumHeight(d.property("original_height").toInt());
+            } else {
+                d.setProperty("original_height", d.height());
+                d.setMaximumHeight(QWIDGETSIZE_MAX);
+            }
+            detailsContainer->setVisible(!isVisible);
+            updateDetailsLink(isVisible);
+        });
+
+        d.addContent(contentWidget);
+    }
+
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     d.addButton(tr("OK", "button"), true, DDialog::ButtonNormal);
     d.exec();
 }
@@ -548,7 +704,7 @@ int DialogManager::showRenameNameSameErrorDialog(const QString &name)
     buttonTexts.append(tr("Confirm", "button"));
     d.addButton(buttonTexts[0], true, DDialog::ButtonNormal);
     d.setDefaultButton(0);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     int code = d.exec();
     return code;
 }
@@ -562,7 +718,7 @@ void DialogManager::showRenameBusyErrDialog()
     buttonTexts.append(tr("Confirm", "button"));
     d.addButton(buttonTexts[0], true, DDialog::ButtonNormal);
     d.setDefaultButton(0);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     d.exec();
 }
 
@@ -575,7 +731,7 @@ int DialogManager::showRenameNameDotBeginDialog()
     d.addButton(tr("Cancel"));
 
     d.setDefaultButton(0);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
 
     int ret = -1;
     connect(&d, &DDialog::buttonClicked, this, [=, &ret](int index, const QString &text) {
@@ -623,7 +779,7 @@ DFMBASE_NAMESPACE::GlobalEventType DialogManager::showBreakSymlinkDialog(const Q
     d.addButton(buttonTexts[0], true);
     d.addButton(buttonTexts[1], false, DDialog::ButtonRecommend);
     d.setDefaultButton(1);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     int code = d.exec();
     if (code == 1) {
         QList<QUrl> urls;
@@ -645,7 +801,7 @@ int DialogManager::showAskIfAddExcutableFlagAndRunDialog()
     d.addButton(tr("Cancel", "button"));
     d.addButton(tr("Run", "button"), true, DDialog::ButtonRecommend);
     d.setTitle(message);
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     int code = d.exec();
     return code;
 }
@@ -654,7 +810,7 @@ void DialogManager::showDeleteSystemPathWarnDialog(quint64 winId)
 {
     DDialog d(FMWindowsIns.findWindowById(winId));
     d.setTitle(tr("The selected files contain system file/directory, and it cannot be deleted"));
-    d.setIcon(warningIcon);
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     d.addButton(tr("OK", "button"), true, DDialog::ButtonNormal);
     d.exec();
 }
@@ -662,9 +818,6 @@ void DialogManager::showDeleteSystemPathWarnDialog(quint64 winId)
 DialogManager::DialogManager(QObject *parent)
     : QObject(parent)
 {
-    infoIcon = QIcon::fromTheme("dialog-information");
-    warningIcon = QIcon::fromTheme("dialog-warning");
-    errorIcon = QIcon::fromTheme("dialog-error");
 }
 
 DialogManager::~DialogManager()

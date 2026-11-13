@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -21,6 +21,7 @@ public:
     virtual QRect geometry() const = 0;
     virtual QRect availableGeometry() const = 0;
     virtual QRect handleGeometry() const = 0;
+    virtual bool checkAvailableGeometry(const QRect &available, const QRect &screen) const = 0;
 Q_SIGNALS:
     void geometryChanged(const QRect &);
     void availableGeometryChanged(const QRect &);

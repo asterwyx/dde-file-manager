@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,5 +38,11 @@ DPSMBBROWSER_END_NAMESPACE
 
 using ContextMenuCallback = std::function<void(quint64 windowId, const QUrl &url, const QPoint &globalPos)>;
 Q_DECLARE_METATYPE(ContextMenuCallback)
+using ItemClickedActionCallback = std::function<void(quint64 windowId, const QUrl &url)>;
+Q_DECLARE_METATYPE(ItemClickedActionCallback);
+using FindMeCallback = std::function<bool(const QUrl &itemUrl, const QUrl &targetUrl)>;
+Q_DECLARE_METATYPE(FindMeCallback);
+using RenameCallback = std::function<void(quint64 windowId, const QUrl &url, const QString &name)>;
+Q_DECLARE_METATYPE(RenameCallback);
 
 #endif   // TYPEDEFINES_H

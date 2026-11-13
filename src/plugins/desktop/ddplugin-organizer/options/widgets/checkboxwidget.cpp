@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,9 +10,11 @@ using namespace ddplugin_organizer;
 CheckBoxWidget::CheckBoxWidget(const QString &text, QWidget *parent)
     : EntryWidget(new DCheckBox(text), nullptr, parent)
 {
-    checkBox = qobject_cast<DCheckBox* >(leftWidget);
-    connect(checkBox, &QCheckBox::stateChanged, this, [this](int stat){
-        emit chenged(stat == Qt::Checked);
+    checkBox = qobject_cast<DCheckBox *>(leftWidget);
+    checkBox->setObjectName("CheckBox");
+    checkBox->setAccessibleName("CheckBox");
+    connect(checkBox, &QCheckBox::stateChanged, this, [this](int stat) {
+        emit changed(stat == Qt::Checked);
     });
 }
 

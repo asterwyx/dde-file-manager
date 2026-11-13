@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,6 +20,10 @@ class DeviceList : public QScrollArea
 public:
     explicit DeviceList(QWidget *parent = nullptr);
 
+protected:
+    void showEvent(QShowEvent *e) override;
+    void hideEvent(QHideEvent *e) override;
+
 private Q_SLOTS:
     void addDevice(const DockItemData &item);
     void removeDevice(const QString &id);
@@ -36,6 +40,7 @@ private:
     DockItemDataManager *manager { nullptr };
     QMap<QString, QWidget *> deviceItems;
     QMap<QString, QString> sortKeys;
+    QWidget *headerWidget { nullptr };
 };
 
 #endif   // DEVICELIST_H

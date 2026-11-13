@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <dfm-base/base/schemefactory.h>
+#include <dfm-base/utils/protocolutils.h>
 #include <dfm-base/utils/fileutils.h>
 
 namespace dfmbase {
@@ -19,15 +20,13 @@ QString InfoFactory::scheme(const QUrl &url)
     if (scheme != Global::Scheme::kFile)
         return scheme;
 
-    if (!FileUtils::isLocalDevice(url))
+    if (ProtocolUtils::isRemoteFile(url))
         return Global::Scheme::kAsyncFile;
 
-    dfmio::DFileInfo dinfo(url);
-    if (!dinfo.attribute(dfmio::DFileInfo::AttributeID::kStandardIsSymlink).toBool())
-        return scheme;
-
-    auto targetPath = dinfo.attribute(dfmio::DFileInfo::AttributeID::kStandardSymlinkTarget).toString();
-    if (!targetPath.isEmpty() && !FileUtils::isLocalDevice(QUrl::fromLocalFile(targetPath)))
+    // Use readlink (non-blocking) to check symlink target; creating DFileInfo triggers
+    // statx via g_file_query_info which follows the symlink and blocks on stale SMB mounts
+    auto targetPath = FileUtils::symlinkTarget(url);
+    if (!targetPath.isEmpty() && ProtocolUtils::isRemoteFile(QUrl::fromLocalFile(targetPath)))
         scheme = Global::Scheme::kAsyncFile;
 
     return scheme;

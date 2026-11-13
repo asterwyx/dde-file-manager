@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "traversaldirthread.h"
+#include "filenamesorter.h"
 #include <dfm-base/base/schemefactory.h>
 
 #include <QElapsedTimer>
@@ -25,7 +26,7 @@ TraversalDirThread::TraversalDirThread(const QUrl &url,
         dirUrl.setPath(path);
         dirIterator = DirIteratorFactory::create<AbstractDirIterator>(dirUrl, nameFilters, filters, flags);
         if (!dirIterator) {
-            qCWarning(logDFMBase) << "Failed create dir iterator from" << url;
+            qCWarning(logDFMBase) << "Failed to create directory iterator for URL:" << url;
             return;
         }
     }
@@ -65,6 +66,25 @@ void TraversalDirThread::stopAndDeleteLater()
     }
 }
 
+void TraversalDirThread::setQueryAttributes(const QString &fileAttributes)
+{
+    if (fileInfoQueryAttributes == fileAttributes)
+        return;
+    fileInfoQueryAttributes = fileAttributes;
+    if (fileInfoQueryAttributes.isEmpty() && fileInfoQueryAttributes != "*")
+        dirIterator->setProperty("QueryAttributes", fileInfoQueryAttributes);
+}
+
+void TraversalDirThread::setEnableSort(bool enable)
+{
+    enableSort = enable;
+}
+
+bool TraversalDirThread::isSortEnabled() const
+{
+    return enableSort;
+}
+
 void TraversalDirThread::run()
 {
     if (dirIterator.isNull())
@@ -73,9 +93,9 @@ void TraversalDirThread::run()
     QElapsedTimer timer;
     timer.start();
 
-    qCInfo(logDFMBase) << "dir query start, url: " << dirUrl;
+    qCInfo(logDFMBase) << "Directory traversal started for URL:" << dirUrl;
     dirIterator->cacheBlockIOAttribute();
-    qCInfo(logDFMBase) << "cacheBlockIOAttribute finished, url: " << dirUrl << " elapsed: " << timer.elapsed();
+    qCInfo(logDFMBase) << "Directory IO attributes cached for URL:" << dirUrl << "elapsed:" << timer.elapsed() << "ms";
 
     if (stopFlag)
         return;
@@ -93,7 +113,14 @@ void TraversalDirThread::run()
         childrenList.append(fileUrl);
     }
     stopFlag = true;
+
+    // 使用 FileNameSorter 进行排序
+    if (enableSort && childrenList.size() > 1) {
+        FileNameSorter::sortUrls(childrenList);
+    }
+
     emit updateChildren(childrenList);
 
-    qCInfo(logDFMBase) << "dir query end, file count: " << childrenList.size() << " url: " << dirUrl << " elapsed: " << timer.elapsed();
+    qCInfo(logDFMBase) << "Directory traversal completed - file count:" << childrenList.size()
+                      << "URL:" << dirUrl << "total elapsed:" << timer.elapsed() << "ms";
 }

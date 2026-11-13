@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -63,8 +63,8 @@ QUrl VaultFileInfoPrivate::vaultUrl(const QUrl &url) const
 QUrl VaultFileInfoPrivate::getUrlByNewFileName(const QString &fileName) const
 {
     QUrl theUrl = q->urlOf(FileInfo::FileUrlInfoType::kUrl);
-    QString newPath =  DFMIO::DFMUtils::buildFilePath(q->pathOf(PathInfoType::kAbsolutePath).toStdString().c_str(),
-                                                      fileName.toStdString().c_str(), nullptr);
+    QString newPath = DFMIO::DFMUtils::buildFilePath(q->pathOf(PathInfoType::kAbsolutePath).toStdString().c_str(),
+                                                     fileName.toStdString().c_str(), nullptr);
     if (!newPath.startsWith(QDir::separator()))
         newPath = QDir::separator() + newPath;
     theUrl.setPath(newPath);
@@ -78,7 +78,7 @@ VaultFileInfo::VaultFileInfo(const QUrl &url)
     : ProxyFileInfo(url), d(new VaultFileInfoPrivate(url, this))
 {
     d->localUrl = VaultHelper::vaultToLocalUrl(url);
-    setProxy(InfoFactory::create<FileInfo>(d->localUrl,  Global::CreateFileInfoType::kCreateFileInfoAsyncAndCache));
+    setProxy(InfoFactory::create<FileInfo>(d->localUrl, Global::CreateFileInfoType::kCreateFileInfoAsyncAndCache));
 }
 
 VaultFileInfo::VaultFileInfo(const QUrl &url, const FileInfoPointer &proxy)
@@ -90,6 +90,7 @@ VaultFileInfo::VaultFileInfo(const QUrl &url, const FileInfoPointer &proxy)
 
 VaultFileInfo::~VaultFileInfo()
 {
+    delete d;
 }
 
 VaultFileInfo &VaultFileInfo::operator=(const VaultFileInfo &fileinfo)
@@ -118,8 +119,10 @@ QString VaultFileInfo::pathOf(const PathInfoType type) const
 {
     switch (type) {
     case FilePathInfoType::kAbsolutePath:
-        if (!proxy)
+        if (!proxy) {
+            fmWarning() << "Vault: No proxy available for absolute path";
             return "";
+        }
         return d->absolutePath(proxy->pathOf(type));
     default:
         return ProxyFileInfo::pathOf(type);
@@ -137,10 +140,13 @@ QUrl VaultFileInfo::urlOf(const UrlInfoType type) const
         return ProxyFileInfo::urlOf(type);
     }
 }
+
 bool VaultFileInfo::exists() const
 {
-    if (urlOf(UrlInfoType::kUrl).isEmpty())
+    if (urlOf(UrlInfoType::kUrl).isEmpty()) {
+        fmDebug() << "Vault: URL is empty, file does not exist";
         return false;
+    }
 
     return proxy && proxy->exists();
 }
@@ -148,6 +154,7 @@ bool VaultFileInfo::exists() const
 void VaultFileInfo::refresh()
 {
     if (!proxy) {
+        fmWarning() << "Vault: No proxy available for refresh";
         return;
     }
 
@@ -188,7 +195,7 @@ bool VaultFileInfo::canAttributes(const CanableInfoType type) const
         }
         return !proxy || proxy->canAttributes(type);
     case FileCanType::kCanRedirectionFileUrl:
-        return proxy;
+        return !proxy.isNull();
     default:
         return ProxyFileInfo::canAttributes(type);
     }
@@ -196,8 +203,10 @@ bool VaultFileInfo::canAttributes(const CanableInfoType type) const
 
 QVariantHash VaultFileInfo::extraProperties() const
 {
-    if (!proxy)
+    if (!proxy) {
+        fmDebug() << "Vault: No proxy available for extraProperties, URL:" << url.toString();
         return ProxyFileInfo::extraProperties();
+    }
     return proxy->extraProperties();
 }
 
@@ -214,12 +223,14 @@ QUrl VaultFileInfo::getUrlByType(const UrlInfoType type, const QString &fileName
 QIcon VaultFileInfo::fileIcon()
 {
     if (d->isRoot) {
-        QString iconName = "dfm_safebox";   // 如果是根目录，用保险柜图标
+        QString iconName = "safebox";   // 如果是根目录，用保险柜图标
         return QIcon::fromTheme(iconName);
     }
 
-    if (!proxy)
+    if (!proxy) {
+        fmDebug() << "Vault: No proxy available for fileIcon, URL:" << url.toString();
         return ProxyFileInfo::fileIcon();
+    }
     return proxy->fileIcon();
 }
 
@@ -236,8 +247,10 @@ QString VaultFileInfo::viewOfTip(const FileInfo::ViewType type) const
 
 qint64 VaultFileInfo::size() const
 {
-    if (!proxy)
+    if (!proxy) {
+        fmDebug() << "Vault: No proxy available for size, URL:" << url.toString();
         return ProxyFileInfo::size();
+    }
     return proxy->size();
 }
 
@@ -257,8 +270,10 @@ QVariant VaultFileInfo::extendAttributes(const ExtInfoType type) const
 {
     switch (type) {
     case FileExtendedInfoType::kSizeFormat:
-        if (!proxy)
+        if (!proxy) {
+            fmDebug() << "Vault: No proxy available, using base extended attributes";
             return ProxyFileInfo::extendAttributes(type);
+        }
         return proxy->extendAttributes(type);
     default:
         return ProxyFileInfo::extendAttributes(type);
@@ -271,14 +286,16 @@ QString VaultFileInfo::nameOf(const NameInfoType type) const
     case NameInfoType::kFileCopyName:
         return displayOf(DisPlayInfoType::kFileDisplayName);
     case NameInfoType::kIconName: {
-        QString iconName = "dfm_safebox";   // 如果是根目录，用保险柜图标
+        QString iconName = "safebox";   // 如果是根目录，用保险柜图标
         if (d->isRoot) {
             return iconName;
         } else {
-            if (!proxy)
+            if (!proxy) {
+                fmDebug() << "Vault: No proxy available for icon name, URL:" << url.toString();
                 return const_cast<VaultFileInfo *>(this)->fileMimeType(QMimeDatabase::MatchDefault).iconName();
-            else
+            } else {
                 return proxy->nameOf(NameInfoType::kIconName);
+            }
         }
     }
     default:
@@ -291,10 +308,12 @@ QString VaultFileInfo::displayOf(const DisPlayInfoType type) const
     switch (type) {
     case DisPlayInfoType::kFileDisplayName:
         if (d->isRoot)
-            return QObject::tr("My Vault");
-        if (proxy)
-            return proxy->displayOf(DisPlayInfoType::kFileDisplayName);
-        return ProxyFileInfo::displayOf(type);
+            return QObject::tr("File Vault");
+        if (!proxy) {
+            fmDebug() << "Vault: No proxy available for display name, URL:" << url.toString();
+            return ProxyFileInfo::displayOf(type);
+        }
+        return proxy->displayOf(DisPlayInfoType::kFileDisplayName);
     case DisPlayInfoType::kFileDisplayPath:
         return d->fileDisplayPath();
     default:

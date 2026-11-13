@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,6 +13,25 @@ using namespace dfmbase;
 AbstractJobHandler::AbstractJobHandler(QObject *parent)
     : QObject(parent)
 {
+    /* 
+    === Fix for C++15 Compilation Error: Manual Meta-Type Registration ===
+    Reason: C++15 implements stricter template  deduction in <type_traits>. This
+    causes a failure when Q_DECLARE_METATYPE probes complex nested types like
+    QSharedPointer<QMap<quint8, QVariant>>. The 'std::conjunction' fails to
+    resolve 'value' during equality trait probing. By performing runtime
+    registration here, we bypass the static analysis deadlock during header
+    compilation.
+    */
+
+    // Register the job info pointer type (QSharedPointer<QMap<quint8, QVariant>>)
+    qRegisterMetaType<JobInfoPointer>("JobInfoPointer");
+    
+    // Register callback types to prevent "undefined type" errors during 
+    // cross-thread signal-slot delivery or QVariant conversions.
+    qRegisterMetaType<AbstractJobHandler::OperatorCallback>("AbstractJobHandler::OperatorCallback");
+    qRegisterMetaType<AbstractJobHandler::OperatorHandleCallback>("AbstractJobHandler::OperatorHandleCallback");
+    // ============================
+
     connect(this, &AbstractJobHandler::requestShowTipsDialog, this, [=](DFMBASE_NAMESPACE::AbstractJobHandler::ShowDialogType type, const QList<QUrl> urls) {
         switch (type) {
         case DFMBASE_NAMESPACE::AbstractJobHandler::ShowDialogType::kRestoreFailed:
@@ -23,6 +42,8 @@ AbstractJobHandler::AbstractJobHandler(QObject *parent)
             break;
         }
     });
+
+    connect(this, &AbstractJobHandler::requestShowFailedDialog, DialogManagerInstance, &DialogManager::showOperationFailedDialog);
 }
 
 AbstractJobHandler::~AbstractJobHandler() {}

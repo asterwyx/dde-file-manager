@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,6 +34,7 @@ class DirShare : public DPF_NAMESPACE::Plugin
     DPF_EVENT_REG_SIGNAL(signal_Share_ShareCountChanged)
     DPF_EVENT_REG_SIGNAL(signal_Share_ShareAdded)
     DPF_EVENT_REG_SIGNAL(signal_Share_ShareRemoved)
+    DPF_EVENT_REG_SIGNAL(signal_Share_ShareChanged)
     DPF_EVENT_REG_SIGNAL(signal_Share_RemoveShareFailed)
     // *******************end Share*******************
 
@@ -46,6 +47,7 @@ private:
     void bindScene(const QString &parentScene);
     void bindSceneOnAdded(const QString &newScene);
     void bindEvents();
+    void regToPropertyDialog();
 
 private Q_SLOTS:
     void onShareStateChanged(const QString &path);

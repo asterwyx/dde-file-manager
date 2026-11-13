@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -23,6 +23,11 @@ AbstractBaseView::~AbstractBaseView()
 
 void AbstractBaseView::deleteLater()
 {
+}
+
+QWidget *AbstractBaseView::contentWidget() const
+{
+    return nullptr;
 }
 
 AbstractBaseView::ViewState AbstractBaseView::viewState() const

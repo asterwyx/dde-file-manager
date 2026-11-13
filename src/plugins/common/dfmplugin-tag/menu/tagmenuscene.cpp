@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,7 +9,7 @@
 #include "widgets/tagcolorlistwidget.h"
 #include "events/tageventcaller.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/base/schemefactory.h>
@@ -17,14 +17,18 @@
 #include <dfm-base/dfm_desktop_defines.h>
 #include <dfm-base/utils/fileutils.h>
 #include <dfm-base/utils/universalutils.h>
+#include <dfm-base/widgets/filemanagerwindowsmanager.h>
 
 #include <dfm-framework/dpf.h>
 
 #include <QMenu>
+#include <QWidget>
 #include <QWidgetAction>
 
 using namespace dfmplugin_tag;
 DFMBASE_USE_NAMESPACE
+
+static constexpr char kActionGroupId[] { "act_group_id" };
 
 TagMenuScene::TagMenuScene(QObject *parent)
     : AbstractMenuScene(parent), d(new TagMenuScenePrivate(this))
@@ -60,6 +64,13 @@ bool TagMenuScene::initialize(const QVariantHash &params)
     d->predicateName.insert(TagActionId::kActTagColorListKey, "");
     d->predicateName.insert(TagActionId::kActTagAddKey, tr("Tag information"));
 
+    QString errString;
+    d->focusFileInfo = DFMBASE_NAMESPACE::InfoFactory::create<FileInfo>(d->focusFile, Global::CreateFileInfoType::kCreateFileInfoAuto, &errString);
+    if (d->focusFileInfo.isNull()) {
+        fmDebug() << errString;
+        return false;
+    }
+
     auto subScenes = subscene();
     if (auto filterScene = dfmplugin_menu_util::menuSceneCreateScene("DConfigMenuFilter"))
         subScenes << filterScene;
@@ -80,17 +91,24 @@ bool TagMenuScene::create(QMenu *parent)
     if (!TagManager::instance()->canTagFile(d->focusFile))
         return false;
 
+    if (!d->focusFileInfo->exists())
+        return false;
+
     // create by focus fileinfo
     d->tagNames = TagManager::instance()->getTagsByUrls({ FileUtils::bindUrlTransform(d->focusFile) });
-    QAction *colorListAction = createColorListAction();
+    QAction *colorListAction = createColorListAction(parent);
     colorListAction->setProperty(ActionPropertyKey::kActionID, QString(TagActionId::kActTagColorListKey));
     parent->addAction(colorListAction);
     d->predicateAction.insert(TagActionId::kActTagColorListKey, colorListAction);
 
-    QAction *tagAction = createTagAction();
+    QAction *tagAction = createTagAction(parent);
     tagAction->setProperty(ActionPropertyKey::kActionID, QString(TagActionId::kActTagAddKey));
     parent->addAction(tagAction);
     d->predicateAction.insert(TagActionId::kActTagAddKey, tagAction);
+
+    // Set same group ID to prevent other menu items from being inserted between them
+    colorListAction->setProperty(kActionGroupId, "dfm_tag_group");
+    tagAction->setProperty(kActionGroupId, "dfm_tag_group");
     return AbstractMenuScene::create(parent);
 }
 
@@ -107,6 +125,7 @@ bool TagMenuScene::triggered(QAction *action)
     if (d->predicateAction.value(TagActionId::kActTagAddKey) != action || !d->focusFile.isValid())
         return false;
 
+    QWidget *parent = nullptr;
     QRectF viewRect;
     QRectF iconRect;
 
@@ -121,9 +140,14 @@ bool TagMenuScene::triggered(QAction *action)
             const QRect &visualRect = TagEventCaller::getCollectionVisualRect(id, d->focusFile);
             iconRect = TagEventCaller::getCollectionIconRect(id, visualRect);
             if (auto view = TagEventCaller::getCollectionView(id)) {
-                viewRect = d->getSurfaceRect(view);
-                QPoint iconTopLeft = view->mapToGlobal(iconRect.topLeft().toPoint());
-                iconRect.setRect(iconTopLeft.x(), iconTopLeft.y(), iconRect.width(), iconRect.height());
+                if (auto window = view->window()) {
+                    parent = window;
+                    const QPoint origin = view->mapTo(window, QPoint(0, 0));
+                    iconRect.translate(origin);
+                    QRect surfaceRect;
+                    if (QWidget *surface = d->getSurface(view, &surfaceRect))
+                        viewRect = surfaceRect.translated(surface->mapTo(window, QPoint(0, 0)));
+                }
             } else {
                 fmWarning() << "can not get collection view, id:" << id;
             }
@@ -136,9 +160,12 @@ bool TagMenuScene::triggered(QAction *action)
             const QRect &visualRect = TagEventCaller::getVisualRect(viewIndex, d->focusFile);
             iconRect = TagEventCaller::getIconRect(viewIndex, visualRect);
             if (auto view = TagEventCaller::getDesktopView(viewIndex)) {
-                viewRect = view->rect();
-                QPoint iconTopLeft = view->mapToGlobal(iconRect.topLeft().toPoint());
-                iconRect.setRect(iconTopLeft.x(), iconTopLeft.y(), iconRect.width(), iconRect.height());
+                if (auto window = view->window()) {
+                    parent = window;
+                    const QPoint origin = view->mapTo(window, QPoint(0, 0));
+                    viewRect = view->rect().translated(origin);
+                    iconRect.translate(origin);
+                }
             } else {
                 fmWarning() << "can not get canvas view, index:" << viewIndex;
             }
@@ -146,9 +173,16 @@ bool TagMenuScene::triggered(QAction *action)
     } else {
         viewRect = TagEventCaller::getVisibleGeometry(d->windowId);
         iconRect = TagEventCaller::getItemRect(d->windowId, d->focusFile, DFMGLOBAL_NAMESPACE::kItemIconRole);
+        if (auto window = FMWindowsIns.findWindowById(d->windowId)) {
+            parent = window;
+            // rects from the workspace plugin are global, convert them to window relative
+            const QPointF origin = window->mapToGlobal(QPoint(0, 0));
+            viewRect.translate(-origin);
+            iconRect.translate(-origin);
+        }
     }
 
-    TagHelper::instance()->showTagEdit(viewRect, iconRect, d->selectFiles, (d->currentDir.scheme() == TagManager::scheme()));
+    TagHelper::instance()->showTagEdit(parent, viewRect, iconRect, d->selectFiles, (d->currentDir.scheme() == TagManager::scheme()));
 
     return AbstractMenuScene::triggered(action);
 }
@@ -183,7 +217,11 @@ void TagMenuScene::onHoverChanged(const QColor &color)
             return;
 
         if (Q_LIKELY(color.isValid())) {
-            const QString &tagName = TagHelper::instance()->qureyDisplayNameByColor(color);
+            // DB-first lookup: use cached mapping from createColorListAction
+            QString tagName = d->colorToTag.value(color.name(), QString());
+            // Fallback to hardcoded table for brand-new tags not yet in DB
+            if (tagName.isEmpty())
+                tagName = TagHelper::instance()->queryDisplayNameByColor(color);
             if (sameColors.contains(color))
                 tagWidget->setToolTipText(tr("Remove tag \"%1\"").arg(tagName));
             else
@@ -199,13 +237,22 @@ void TagMenuScene::onColorClicked(const QColor &color)
 {
     TagColorListWidget *tagWidget = getMenuListWidget();
     if (tagWidget) {
+        // DB-first lookup: use cached mapping from createColorListAction
+        QString tagName = d->colorToTag.value(color.name(), QString());
+        // Fallback to hardcoded table for brand-new tags not yet in DB
+        if (tagName.isEmpty())
+            tagName = TagHelper::instance()->queryDisplayNameByColor(color);
+
+        if (tagName.isEmpty())
+            return;
+
         QList<QColor> colors = tagWidget->checkedColorList();
         if (colors.contains(color)) {
             //add checked tag
-            TagManager::instance()->addTagsForFiles({ TagHelper::instance()->qureyDisplayNameByColor(color) }, d->selectFiles);
+            TagManager::instance()->addTagsForFiles({ tagName }, d->selectFiles);
         } else {
             // delete checked tag
-            TagManager::instance()->removeTagsOfFiles({ TagHelper::instance()->qureyDisplayNameByColor(color) }, d->selectFiles);
+            TagManager::instance()->removeTagsOfFiles({ tagName }, d->selectFiles);
         }
     }
 }
@@ -225,30 +272,38 @@ TagColorListWidget *TagMenuScene::getMenuListWidget() const
     return nullptr;
 }
 
-QAction *TagMenuScene::createTagAction() const
+QAction *TagMenuScene::createTagAction(QMenu *parent) const
 {
-    QAction *action = new QAction;
+    QAction *action = new QAction(parent);
     action->setText(d->predicateName.value(TagActionId::kActTagAddKey));
 
     return action;
 }
 
-QAction *TagMenuScene::createColorListAction() const
+QAction *TagMenuScene::createColorListAction(QMenu *parent) const
 {
-    TagColorListWidget *colorListWidget = new TagColorListWidget;
-    QWidgetAction *action = new QWidgetAction(nullptr);
+    TagColorListWidget *colorListWidget = new TagColorListWidget(parent);
+    QWidgetAction *action = new QWidgetAction(parent);
 
     action->setDefaultWidget(colorListWidget);
     // get tags by focus fileinfo
     QStringList tags = TagManager::instance()->getTagsByUrls({ FileUtils::bindUrlTransform(d->focusFile) });
+    // Query actual colors from DB to handle renamed tags correctly
+    QMap<QString, QColor> tagColors = TagManager::instance()->getTagsColor(tags);
     QList<QColor> colors;
+
+    // Build color->tagName mapping from DB once for onHoverChanged/onColorClicked reuse
+    const auto allTags = TagManager::instance()->getAllTags();
+    d->colorToTag.clear();
+    for (auto it = allTags.cbegin(); it != allTags.cend(); ++it)
+        d->colorToTag[it.value().name()] = it.key();
 
     for (const QString &tag : tags) {
         // The tag name of the database is the display name of the tag
-        if (!TagHelper::instance()->isDefualtTag(tag))
+        if (!TagHelper::instance()->isDefaultTag(tag))
             continue;
 
-        const QColor &color = TagHelper::instance()->qureyColorByDisplayName(tag);
+        const QColor &color = tagColors.value(tag, QColor());
 
         if (Q_LIKELY(color.isValid()))
             colors << color;

@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "private/fileinfo_p.h"
-
+#include <dfm-base/interfaces/private/fileinfo_p.h>
 #include <dfm-base/utils/chinese2pinyin.h>
 #include <dfm-base/mimetype/mimetypedisplaymanager.h>
 #include <dfm-base/utils/fileutils.h>
@@ -38,9 +37,12 @@ Q_GLOBAL_STATIC_WITH_ARGS(int, type_id, { qRegisterMetaType<FileInfoPointer>("Fi
  * \param QUrl & 文件的URL
  */
 FileInfo::FileInfo(const QUrl &url)
-    : AbstractFileInfo(url), dptr(new FileInfoPrivate(this)) { Q_UNUSED(type_id) }
+    : AbstractFileInfo(url), dptr(new FileInfoPrivate(this))
+{
+    Q_UNUSED(type_id)
+}
 
-      FileInfo::~FileInfo()
+FileInfo::~FileInfo()
 {
 }
 /*!
@@ -117,10 +119,10 @@ void dfmbase::FileInfo::cacheAttribute(DFileInfo::AttributeID id, const QVariant
     Q_UNUSED(value);
 }
 /*!
-  * \brief 获取文件名称，默认是获取文件的全名称带suffix，此接口不会实现异步，全部使用Qurl去
-  * 处理或者字符串处理，这都比较快
-  * \param FileNameInfoType
-  */
+ * \brief 获取文件名称，默认是获取文件的全名称带suffix，此接口不会实现异步，全部使用Qurl去
+ * 处理或者字符串处理，这都比较快
+ * \param FileNameInfoType
+ */
 QString dfmbase::FileInfo::nameOf(const NameInfoType type) const
 {
     switch (type) {
@@ -129,11 +131,11 @@ QString dfmbase::FileInfo::nameOf(const NameInfoType type) const
     case FileNameInfoType::kFileNameOfRename:
         return dptr->fileName();
     case FileNameInfoType::kBaseName:
+        return dptr->baseName();
+    case FileNameInfoType::kBaseNameOfRename:
         [[fallthrough]];
     case FileNameInfoType::kCompleteBaseName:
-        [[fallthrough]];
-    case FileNameInfoType::kBaseNameOfRename:
-        return dptr->baseName();
+        return dptr->completeBaseName();
     case FileNameInfoType::kSuffixOfRename:
         [[fallthrough]];
     case FileNameInfoType::kSuffix:
@@ -146,11 +148,12 @@ QString dfmbase::FileInfo::nameOf(const NameInfoType type) const
         return QString();
     }
 }
+
 /*!
-  * \brief 获取文件路径，默认是文件全路径，此接口不会实现异步，全部使用Qurl去
-  * 处理或者字符串处理，这都比较快
-  * \param FileNameInfoType
-  */
+ * \brief 获取文件路径，默认是文件全路径，此接口不会实现异步，全部使用Qurl去
+ * 处理或者字符串处理，这都比较快
+ * \param FileNameInfoType
+ */
 QString dfmbase::FileInfo::pathOf(const PathInfoType type) const
 {
     Q_UNUSED(type);
@@ -158,9 +161,9 @@ QString dfmbase::FileInfo::pathOf(const PathInfoType type) const
     case FilePathInfoType::kFilePath:
         [[fallthrough]];
     case FilePathInfoType::kAbsoluteFilePath:
-        [[fallthrough]];
-    case FilePathInfoType::kCanonicalPath:
         return url.path();
+    case FilePathInfoType::kCanonicalPath:
+        return dptr->canonicalPath();
     case FilePathInfoType::kPath:
         [[fallthrough]];
     case FilePathInfoType::kAbsolutePath:
@@ -214,9 +217,9 @@ qint64 FileInfo::size() const
 }
 
 /*!
-  * \brief 获取文件的时间信息
-  * \param FileTimeType
-  */
+ * \brief 获取文件的时间信息
+ * \param FileTimeType
+ */
 QVariant dfmbase::FileInfo::timeOf(const TimeInfoType type) const
 {
     switch (type) {
@@ -301,10 +304,7 @@ QString dfmbase::FileInfo::displayOf(const DisPlayInfoType type) const
     case DisPlayInfoType::kMimeTypeDisplayName:
         return MimeTypeDisplayManager::instance()->displayName(nameOf(FileNameInfoType::kMimeTypeName));
     case DisPlayInfoType::kFileTypeDisplayName:
-        return QString::number(static_cast<int>(MimeTypeDisplayManager::
-                                                        instance()
-                                                                ->displayNameToEnum(const_cast<FileInfo *>(this)->fileMimeType().name())))
-                .append(nameOf(FileNameInfoType::kSuffix));
+        return MimeTypeDisplayManager::instance()->fullMimeName(nameOf(FileNameInfoType::kMimeTypeName));
     case DisPlayInfoType::kFileDisplayPinyinName:
         if (pinyinName.isEmpty()) {
             const QString &displayName = this->displayOf(DisplayInfoType::kFileDisplayName);
@@ -351,9 +351,9 @@ QUrl dfmbase::FileInfo::getUrlByType(const UrlInfoType type, const QString &file
     }
 }
 /*!
-  * \brief view进入当前目录的提示信息，固定字符串处理，不实现异步
-  * \param SupportType
-  */
+ * \brief view进入当前目录的提示信息，固定字符串处理，不实现异步
+ * \param SupportType
+ */
 Qt::DropActions DFMBASE_NAMESPACE::FileInfo::supportedOfAttributes(const SupportedType type) const
 {
     switch (type) {
@@ -392,8 +392,7 @@ bool dfmbase::FileInfo::canAttributes(const CanableInfoType type) const
 {
     switch (type) {
     case FileCanType::kCanFetch:
-        return isAttributes(OptInfoType::kIsDir)
-                && !isAttributes(OptInfoType::kIsPrivate);
+        return isAttributes(OptInfoType::kIsDir);
     case FileCanType::kCanDrop:
         return dptr->canDrop();
     case FileCanType::kCanDrag:
@@ -464,10 +463,10 @@ void dfmbase::FileInfo::updateAttributes(const QList<dfmbase::FileInfo::FileInfo
 }
 
 /*!
-  * \brief setExtendedAttributes 设置文件的扩展属性
-  * \param ExInfo 扩展属性key \param QVariant 属性
-  * return
-  */
+ * \brief setExtendedAttributes 设置文件的扩展属性
+ * \param ExInfo 扩展属性key \param QVariant 属性
+ * return
+ */
 void DFMBASE_NAMESPACE::FileInfo::setExtendedAttributes(const ExtInfoType &key, const QVariant &value)
 {
     QWriteLocker locker(&extendOtherCacheLock);
@@ -598,6 +597,29 @@ QString FileInfoPrivate::fileName() const
 QString FileInfoPrivate::baseName() const
 {
     const QString &fileName = this->fileName();
+    const QString &completeSuffix = q->nameOf(NameInfoType::kCompleteSuffix);
+
+    if (completeSuffix.isEmpty()) {
+        return fileName;
+    }
+
+    return fileName.left(fileName.length() - completeSuffix.length() - 1);
+}
+
+/*!
+ * \brief completeBaseName 文件的完整基本名称
+ *
+ * url = file:///tmp/archive.tar.gz
+ *
+ * completeBaseName = archive.tar
+ *
+ * \param
+ *
+ * \return
+ */
+QString FileInfoPrivate::completeBaseName() const
+{
+    const QString &fileName = this->fileName();
     const QString &suffix = q->nameOf(NameInfoType::kSuffix);
 
     if (suffix.isEmpty()) {
@@ -631,21 +653,23 @@ QString dfmbase::FileInfoPrivate::suffix() const
  * \brief DFMBASE_NAMESPACE::FileInfo::canDrop
  * \return
  */
-bool DFMBASE_NAMESPACE::FileInfoPrivate::canDrop()
+bool DFMBASE_NAMESPACE::FileInfoPrivate::canDrop() const
 {
-    if (q->isAttributes(OptInfoType::kIsPrivate)) {
-        return false;
-    }
-
     if (!q->isAttributes(OptInfoType::kIsSymLink)) {
         const bool isDesktop = q->nameOf(NameInfoType::kMimeTypeName) == Global::Mime::kTypeAppXDesktop;
-        return q->isAttributes(OptInfoType::kIsDir) || isDesktop;
+        return (q->isAttributes(OptInfoType::kIsDir) && q->isAttributes(OptInfoType::kIsWritable)) || isDesktop;
     }
 
     FileInfoPointer info = nullptr;
     QString linkTargetPath = q->pathOf(PathInfoType::kSymLinkTarget);
-
+    QSet<QString> targetPaths {};
     do {
+        if (targetPaths.contains(linkTargetPath)) {
+            return false;
+        } else {
+            targetPaths.insert(linkTargetPath);
+        }
+
         const QUrl &targetUrl = QUrl::fromLocalFile(linkTargetPath);
 
         if (targetUrl == q->fileUrl()) {
@@ -662,6 +686,28 @@ bool DFMBASE_NAMESPACE::FileInfoPrivate::canDrop()
     } while (info->isAttributes(OptInfoType::kIsSymLink));
 
     return info->canAttributes(CanableInfoType::kCanDrop);
+}
+
+/*!
+ * \brief SyncFileInfoPrivate::canonicalPath
+ *
+ * 返回文件的规范路径（canonical path），解析所有符号链接并返回绝对路径。
+ *
+ * \return 规范路径的 QString。如果路径无效或无法解析，返回空字符串。
+ */
+QString dfmbase::FileInfoPrivate::canonicalPath() const
+{
+    QString path = q->fileUrl().path();
+    if (path.isEmpty())
+        return QString();
+
+    char resolvedPath[PATH_MAX] = { 0 };
+    if (::realpath(path.toStdString().c_str(), resolvedPath) != nullptr) {
+        return QString(resolvedPath);   // 返回解析后的规范路径
+    } else {
+        qCWarning(logDFMBase) << "Failed to resolve canonical path for" << path << ":" << strerror(errno);
+        return QString();
+    }
 }
 
 }

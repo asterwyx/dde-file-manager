@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,7 @@
 #include "dfmplugin_optical_global.h"
 
 #include <QObject>
+#include <QUrl>
 
 namespace dfmplugin_optical {
 
@@ -29,7 +30,7 @@ public slots:
     bool handleDropFiles(const QList<QUrl> &fromUrls, const QUrl &toUrl);
     bool handleBlockShortcutPaste(quint64 winId, const QList<QUrl> &fromUrls, const QUrl &to);
     bool detailViewIcon(const QUrl &url, QString *iconName);
-    bool handleTabClosable(const QUrl &currentUrl, const QUrl &rootUrl);
+    bool handleTabCloseable(const QUrl &currentUrl, const QUrl &rootUrl);
 
 private:
     bool isContainPWSubDirFile(const QList<QUrl> &urls);

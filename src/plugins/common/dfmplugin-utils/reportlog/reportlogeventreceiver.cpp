@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -113,7 +113,7 @@ void ReportLogEventReceiver::handleBlockMountData(const QString &id, bool result
     ReportLogManager::instance()->reportBlockMountData(id, result);
 }
 
-void ReportLogEventReceiver::handleMountNetworkResult(bool ret, dfmmount::DeviceError err, const QString &msg)
+void ReportLogEventReceiver::handleMountNetworkResult(const QString &, bool ret, dfmmount::DeviceError err, const QString &msg)
 {
     ReportLogManager::instance()->reportNetworkMountData(ret, err, msg);
 }

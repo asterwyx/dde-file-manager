@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,10 @@
 #include <QString>
 #include <QVariantMap>
 #include <QUrl>
+
+namespace common_utils {
+bool isIntegratedByFilemanager();
+}
 
 namespace size_format {
 QString formatDiskSize(const quint64 num);
@@ -21,6 +25,7 @@ bool parseSmbInfo(const QString &id, QString *host, QString *share, int *port = 
 namespace device_utils {
 QString blockDeviceName(const QVariantMap &data);
 QString protocolDeviceName(const QVariantMap &data);
+QString protocolDeviceAlias(const QString &scheme, const QString &host);
 
 QString blockDeviceIcon(const QVariantMap &data);
 QString protocolDeviceIcon(const QVariantMap &data);

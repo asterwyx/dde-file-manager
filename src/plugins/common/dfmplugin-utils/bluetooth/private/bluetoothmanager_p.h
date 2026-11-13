@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,6 +10,7 @@
 
 #include <QDBusConnection>
 #include <QDBusReply>
+#include <QMap>
 
 template<class T>
 class QFutureWatcher;
@@ -22,6 +23,7 @@ class BluetoothManagerPrivate : public QObject
     Q_OBJECT
 public:
     explicit BluetoothManagerPrivate(BluetoothManager *qq);
+    ~BluetoothManagerPrivate();
     BluetoothManagerPrivate(BluetoothManagerPrivate &) = delete;
     BluetoothManagerPrivate &operator=(BluetoothManagerPrivate &) = delete;
 
@@ -56,6 +58,7 @@ public:
     BluetoothModel *model { nullptr };
     QDBusInterface *bluetoothInter { nullptr };
     QFutureWatcher<QPair<QString, QString>> *watcher { nullptr };
+    QMap<QString, bool> longFilenameFailures;
 
     Q_DECLARE_PUBLIC(BluetoothManager)
 };

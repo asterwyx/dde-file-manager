@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,9 +8,9 @@
 #include "menus/organizermenu_defines.h"
 #include "private/surface.h"
 
-#include "desktoputils/ddpugin_eventinterface_helper.h"
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
-#include "plugins/desktop/core/ddplugin-canvas/menu/canvasmenu_defines.h"
+#include "desktoputils/ddplugin_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/desktop/ddplugin-canvas/menu/canvasmenu_defines.h"
 
 #include <dfm-base/dfm_menu_defines.h>
 #include <dfm-base/dfm_global_defines.h>
@@ -18,18 +18,19 @@
 #include <dfm-base/base/application/application.h>
 #include <dfm-base/base/application/settings.h>
 
-#include <QGSettings>
-#include <QMenu>
 #include <QItemSelectionModel>
 
 DFMGLOBAL_USE_NAMESPACE
 DFMBASE_USE_NAMESPACE
+DWIDGET_USE_NAMESPACE
 
 using namespace ddplugin_organizer;
 
 CollectionViewMenu::CollectionViewMenu(CollectionView *parent)
     : QObject(parent), view(parent)
 {
+    view->setObjectName("CollectionView");
+    view->setAccessibleName("CollectionView");
 }
 
 bool CollectionViewMenu::disableMenu()
@@ -69,15 +70,21 @@ void CollectionViewMenu::emptyAreaMenu()
     }
 
     if (!canvasScene->initialize(params)) {
+        fmWarning() << "Failed to initialize canvas menu scene";
         delete canvasScene;
         return;
     }
 
-    QMenu menu(view);
-    canvasScene->create(&menu);
-    canvasScene->updateState(&menu);
+    if (menuPtr)
+        delete menuPtr;
 
-    if (QAction *act = menu.exec(QCursor::pos())) {
+    menuPtr = new DMenu(view);
+    menuPtr->setObjectName("MenuPtr");
+    menuPtr->setAccessibleName("MenuPtr");
+    canvasScene->create(menuPtr);
+    canvasScene->updateState(menuPtr);
+
+    if (QAction *act = menuPtr->exec(QCursor::pos())) {
         QList<QUrl> urls { view->model()->rootUrl() };
         dpfSignalDispatcher->publish("ddplugin_organizer", "signal_CollectionView_ReportMenuData", act->text(), urls);
         canvasScene->triggered(act);
@@ -129,15 +136,19 @@ void CollectionViewMenu::normalMenu(const QModelIndex &index, const Qt::ItemFlag
     }
 
     if (!canvasScene->initialize(params)) {
+        fmWarning() << "Failed to initialize canvas menu scene for normal menu";
         delete canvasScene;
         return;
     }
 
-    QMenu menu(view);
-    canvasScene->create(&menu);
-    canvasScene->updateState(&menu);
+    if (menuPtr)
+        delete menuPtr;
 
-    if (QAction *act = menu.exec(QCursor::pos())) {
+    menuPtr = new DMenu(view);
+    canvasScene->create(menuPtr);
+    canvasScene->updateState(menuPtr);
+
+    if (QAction *act = menuPtr->exec(QCursor::pos())) {
         dpfSignalDispatcher->publish("ddplugin_organizer", "signal_CollectionView_ReportMenuData", act->text(), selectUrls);
         canvasScene->triggered(act);
     }
@@ -188,7 +199,7 @@ QWidget *CollectionViewMenu::getCanvasView()
             QString type = wid->property(DesktopFrameProperty::kPropWidgetName).toString();
             if (type == "canvas") {
                 canvas = wid;
-                fmDebug() << "CollectionViewMenu find canvas" << wid << screen;
+                fmDebug() << "Canvas found for menu operations on screen:" << screen;
                 break;
             }
         }

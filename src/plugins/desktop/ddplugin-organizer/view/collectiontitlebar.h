@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,6 +41,7 @@ signals:
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
     void resizeEvent(QResizeEvent *) override;
+    void contextMenuEvent(QContextMenuEvent *) override;
     void rounded();
 
 private:
@@ -49,4 +50,4 @@ private:
 
 }
 
-#endif // COLLECTIONTITLEBAR_H
+#endif   // COLLECTIONTITLEBAR_H

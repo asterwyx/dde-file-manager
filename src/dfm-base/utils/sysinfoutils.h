@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,26 +11,24 @@
 #include <QMimeData>
 
 namespace dfmbase {
+namespace SysInfoUtils {
+QString getUser();
+QStringList getAllUsersOfHome();
+QString getHostName();
+QString getOriginalUserHome();
+int getUserId();
+float getMemoryUsage(int pid);
 
-class SysInfoUtils
-{
+bool isRootUser();
+bool isServerSys();
+bool isDesktopSys();
+bool isOpenAsAdmin();
+bool isDeveloperModeEnabled();
+bool isDeepin23();
+bool isSameUser(const QMimeData *data);
 
-public:
-    static QString getUser();
-    static QStringList getAllUsersOfHome();
-    static QString getHostName();
-    static int getUserId();
-
-    static bool isRootUser();
-    static bool isServerSys();
-    static bool isDesktopSys();
-    static bool isOpenAsAdmin();
-    static bool isDeveloperModeEnabled();
-    static bool isProfessional();
-    static bool isSameUser(const QMimeData *data);
-    static void setMimeDataUserId(QMimeData *data);
-    static float getMemoryUsage(int pid);
-};
-}
+void setMimeDataUserId(QMimeData *data);
+}   // namespace SysInfoUtils
+}   // namespace dfmbase
 
 #endif   // SYSINFOUTILS_H

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -44,6 +44,8 @@ void MountSecretDiskAskPasswordDialog::initUI()
     descriptionLabel->setFont(tipfont);
 
     passwordLineEdit = new DPasswordEdit;
+    passwordLineEdit->setObjectName("PasswordLineEdit");
+    passwordLineEdit->setAccessibleName("PasswordLineEdit");
 
     QVBoxLayout *mainLayout = new QVBoxLayout;
     mainLayout->addWidget(titleLabel);
@@ -61,7 +63,7 @@ void MountSecretDiskAskPasswordDialog::initUI()
         unlockBtn->setEnabled(false);
     setSpacing(10);
     setDefaultButton(1);
-    setIcon(QIcon::fromTheme("dialog-warning"));
+    setIcon(QIcon::fromTheme("dde-file-manager"));
 }
 
 void MountSecretDiskAskPasswordDialog::initConnect()

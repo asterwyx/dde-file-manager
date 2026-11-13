@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,6 +7,7 @@
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/dbusservice/global_server_defines.h>
+#include <dfm-base/dbusservice/opticalshareproxy.h>
 #include <dfm-base/base/device/deviceproxymanager.h>
 #include <dfm-base/base/application/application.h>
 #include <dfm-base/base/application/settings.h>
@@ -21,6 +22,9 @@
 #include <QStandardPaths>
 #include <QRegularExpression>
 #include <QApplication>
+#include <QMimeDatabase>
+#include <QMimeType>
+#include <QSet>
 
 using namespace dfmplugin_burn;
 DWIDGET_USE_NAMESPACE
@@ -184,17 +188,26 @@ QList<QVariantMap> BurnHelper::discDataGroup()
 void BurnHelper::updateBurningStateToPersistence(const QString &id, const QString &dev, bool working)
 {
     QVariantMap info;
-    info[Persistence::kIdKey] = id;
-    info[Persistence::kWoringKey] = working;
+    info[GlobalServerDefines::OpticalShareField::kId] = id;
+    info[GlobalServerDefines::OpticalShareField::kWorking] = working;
 
-    Application::dataPersistence()->setValue(Persistence::kBurnStateGroup, dev, info);
-    Application::dataPersistence()->sync();
+    if (working) {
+        OpticalShareProxy::instance().setBurnState(dev, info);
+        return;
+    }
+
+    OpticalShareProxy::instance().clearBurnState(dev);
 }
 
 void BurnHelper::mapStagingFilesPath(const QList<QUrl> &srcList, const QList<QUrl> &targetList)
 {
     if (!srcList.isEmpty() && (srcList.size() != targetList.size())) {
         fmWarning() << "Src url size != targt url size";
+        return;
+    }
+
+    if (targetList.isEmpty() || !Application::dataPersistence()) {
+        fmWarning() << "Target url is empty";
         return;
     }
 
@@ -223,6 +236,15 @@ bool BurnHelper::isBurnEnabled()
 {
     const auto &&ret = DConfigManager::instance()->value("org.deepin.dde.file-manager.burn", "burnEnable");
     return ret.isValid() ? ret.toBool() : true;
+}
+
+int BurnHelper::defaultBurnFs()
+{
+    const auto &&ret = DConfigManager::instance()->value("org.deepin.dde.file-manager.burn", "defaultBurnFilesystemType", 1);
+    int r = ret.toInt();
+    if (r > 3 || r < 0)
+        r = 1;
+    return r;
 }
 
 bool BurnHelper::burnIsOnLocalStaging(const QUrl &url)
@@ -262,4 +284,20 @@ QFileInfoList BurnHelper::localFileInfoListRecursive(const QString &path, QDir::
     }
 
     return fileList;
+}
+
+bool BurnHelper::isMountableImage(const QString &mimeTypeName)
+{
+    static const QSet<QString> mountable { Global::Mime::kTypeCdImage, Global::Mime::kTypeISO9660Image };
+    if (mountable.contains(mimeTypeName))
+        return true;
+
+    const QMimeType mime = QMimeDatabase().mimeTypeForName(mimeTypeName);
+    if (mime.isValid()) {
+        for (const QString &alias : mime.aliases()) {
+            if (mountable.contains(alias))
+                return true;
+        }
+    }
+    return false;
 }

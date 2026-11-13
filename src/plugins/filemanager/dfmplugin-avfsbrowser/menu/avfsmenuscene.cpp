@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,7 +9,8 @@
 
 #include <dfm-base/dfm_menu_defines.h>
 #include <dfm-base/base/schemefactory.h>
-#include "dfm-framework/dpf.h"
+
+#include <dfm-framework/dpf.h>
 
 #include <QDebug>
 #include <QMenu>
@@ -18,6 +19,7 @@ using namespace dfmplugin_avfsbrowser;
 DFMBASE_USE_NAMESPACE
 
 static constexpr char k3rdSortBy[] { "sort-by" };
+static constexpr char k3rdGroupBy[] { "group-by" };
 static constexpr char k3rdDisplayAs[] { "display-as" };
 static constexpr char k3rdOpenWith[] { "open-with" };
 
@@ -69,6 +71,8 @@ bool AvfsMenuScene::create(QMenu *parent)
             d->predicateAction[k3rdDisplayAs] = act;
         else if (key == k3rdSortBy)
             d->predicateAction[k3rdSortBy] = act;
+        else if (key == k3rdGroupBy)
+            d->predicateAction[k3rdGroupBy] = act;
         else if (key == k3rdOpenWith)
             d->predicateAction[k3rdOpenWith] = act;
         parent->removeAction(act);
@@ -89,8 +93,9 @@ bool AvfsMenuScene::create(QMenu *parent)
 
         parent->addSeparator();
     } else {
-        parent->addAction(d->predicateAction[k3rdSortBy]);
         parent->addAction(d->predicateAction[k3rdDisplayAs]);
+        parent->addAction(d->predicateAction[k3rdSortBy]);
+        parent->addAction(d->predicateAction[k3rdGroupBy]);
         parent->addSeparator();
     }
 

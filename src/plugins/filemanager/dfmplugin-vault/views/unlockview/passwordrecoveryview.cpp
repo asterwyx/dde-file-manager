@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -55,11 +55,14 @@ void PasswordRecoveryView::setResultsPage(QString password)
 
 void PasswordRecoveryView::buttonClicked(int index, const QString &text)
 {
+    fmDebug() << "Vault: Password recovery view button clicked - index:" << index << "text:" << text;
     switch (index) {
     case 0:
+        fmDebug() << "Vault: Go to Unlock button clicked, jumping to unlock page";
         emit signalJump(PageType::kUnlockPage);
         break;
     case 1:
+        fmDebug() << "Vault: Close button clicked, closing dialog";
         emit sigCloseDialog();
         break;
     }

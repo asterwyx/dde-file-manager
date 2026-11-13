@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,7 @@
 #include "dfmplugin_myshares_global.h"
 
 #include <QObject>
+#include <QFileDevice>
 
 DPMYSHARES_BEGIN_NAMESPACE
 
@@ -20,6 +21,7 @@ public:
 
     // file operation
     bool openFileInPlugin(quint64 windowId, const QList<QUrl> &urls);
+    bool setPermissionHandle(const quint64 windowId, const QUrl url, const QFileDevice::Permissions permissions, bool *ok, QString *error);
 
 private:
     explicit ShareFileHelper(QObject *parent = nullptr);

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,8 +7,8 @@
 #include "utils/tagmanager.h"
 
 using namespace dfmplugin_tag;
-static constexpr char kTagService[] { "org.deepin.filemanager.server" };
-static constexpr char kTagDBusPath[] { "/org/deepin/filemanager/server/TagManager" };
+static constexpr char kDaemonName[] { "org.deepin.Filemanager.Daemon" };
+static constexpr char kTagDBusPath[] { "/org/deepin/Filemanager/Daemon/TagManager" };
 
 TagProxyHandlePrivate::TagProxyHandlePrivate(TagProxyHandle *qq, QObject *parent)
     : QObject(parent),
@@ -27,13 +27,13 @@ bool TagProxyHandlePrivate::isDBusRuning()
 
 void TagProxyHandlePrivate::initConnection()
 {
-    dbusWatcher.reset(new QDBusServiceWatcher(kTagService, QDBusConnection::sessionBus()));
+    dbusWatcher.reset(new QDBusServiceWatcher(kDaemonName, QDBusConnection::sessionBus()));
     q->connect(dbusWatcher.data(), &QDBusServiceWatcher::serviceRegistered, q, [this] {
-        fmInfo() << "serviceRegistered: " << kTagService;
+        fmInfo() << "serviceRegistered: " << kDaemonName;
         connectToDBus();
     });
     q->connect(dbusWatcher.data(), &QDBusServiceWatcher::serviceUnregistered, q, [] {
-        fmWarning() << "Lost connection: " << kTagService;
+        fmWarning() << "Lost connection: " << kDaemonName;
     });
 
     connectToDBus();
@@ -50,6 +50,7 @@ void TagProxyHandlePrivate::connectToDBus()
     connections << q->connect(ptr, &TagManagerDBusInterface::TagsNameChanged, q, &TagProxyHandle::tagsNameChanged);
     connections << q->connect(ptr, &TagManagerDBusInterface::FilesTagged, q, &TagProxyHandle::filesTagged);
     connections << q->connect(ptr, &TagManagerDBusInterface::FilesUntagged, q, &TagProxyHandle::filesUntagged);
+    connections << q->connect(ptr, &TagManagerDBusInterface::TrashFileTagsChanged, q, &TagProxyHandle::trashFileTagsChanged);
 }
 
 void TagProxyHandlePrivate::disconnCurrentConnections()
@@ -227,10 +228,83 @@ bool TagProxyHandle::deleteFileTags(const QVariantMap &value)
     return reply.value();
 }
 
+bool TagProxyHandle::saveTrashFileTags(const QString &originalPath, qint64 inode, const QStringList &tags)
+{
+    QVariantMap value;
+    value["originalPath"] = originalPath;
+    value["inode"] = inode;
+    value["tags"] = tags;
+
+    auto &&reply = d->tagDBusInterface->Insert(int(InsertOpts::kTrashFileTags), value);
+    reply.waitForFinished();
+    if (!reply.isValid()) {
+        fmWarning() << "TagProxyHandle::saveTrashFileTags: D-Bus call failed - path:" << originalPath;
+        return false;
+    }
+    return reply.value();
+}
+
+QStringList TagProxyHandle::getTrashFileTags(const QString &originalPath, qint64 inode)
+{
+    QStringList queryValue;
+    queryValue << QString("originalPath:%1").arg(originalPath);
+    queryValue << QString("inode:%1").arg(inode);
+
+    auto &&reply = d->tagDBusInterface->Query(int(QueryOpts::kTrashFileTags), queryValue);
+    reply.waitForFinished();
+    if (!reply.isValid()) {
+        fmWarning() << "TagProxyHandle::getTrashFileTags: D-Bus call failed - path:" << originalPath;
+        return {};
+    }
+
+    QVariantMap result = reply.value().variant().toMap();
+    return result.value("tags").toStringList();
+}
+
+bool TagProxyHandle::removeTrashFileTags(const QString &originalPath, qint64 inode)
+{
+    QVariantMap value;
+    value["originalPath"] = originalPath;
+    value["inode"] = inode;
+
+    auto &&reply = d->tagDBusInterface->Delete(int(DeleteOpts::kTrashFileTags), value);
+    reply.waitForFinished();
+    if (!reply.isValid()) {
+        fmWarning() << "TagProxyHandle::removeTrashFileTags: D-Bus call failed - path:" << originalPath;
+        return false;
+    }
+    return reply.value();
+}
+
+bool TagProxyHandle::clearAllTrashTags()
+{
+    QVariantMap value;  // Empty map
+
+    auto &&reply = d->tagDBusInterface->Delete(int(DeleteOpts::kAllTrashTags), value);
+    reply.waitForFinished();
+    if (!reply.isValid()) {
+        fmWarning() << "TagProxyHandle::clearAllTrashTags: D-Bus call failed";
+        return false;
+    }
+    return reply.value();
+}
+
+QVariantHash TagProxyHandle::getAllTrashFileTags()
+{
+    auto &&reply = d->tagDBusInterface->Query(int(QueryOpts::kAllTrashFileTags));
+    reply.waitForFinished();
+    if (!reply.isValid()) {
+        fmWarning() << "TagProxyHandle::getAllTrashFileTags: D-Bus call failed" << reply.error();
+        return {};
+    }
+    const auto &data = d->parseDBusVariant(reply.value());
+    return data.toHash();
+}
+
 bool TagProxyHandle::connectToService()
 {
     fmInfo() << "Start initilize dbus: `TagManagerDBusInterface`";
-    d->tagDBusInterface.reset(new TagManagerDBusInterface(kTagService, kTagDBusPath,
+    d->tagDBusInterface.reset(new TagManagerDBusInterface(kDaemonName, kTagDBusPath,
                                                           QDBusConnection::sessionBus(), this));
     d->tagDBusInterface->setTimeout(3000);
     d->initConnection();

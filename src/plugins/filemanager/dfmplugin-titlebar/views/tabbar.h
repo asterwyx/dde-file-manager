@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: 2025 - 2026 UnionTech Software Technology Co., Ltd.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#ifndef TABBAR_H
+#define TABBAR_H
+
+#include "dfmplugin_titlebar_global.h"
+
+#include <DTabBar>
+
+#include <QMargins>
+#include <QUrl>
+
+namespace dfmplugin_titlebar {
+
+class TabBarPrivate;
+class TabBar : public DTK_WIDGET_NAMESPACE::DTabBar
+{
+    Q_OBJECT
+public:
+    explicit TabBar(QWidget *parent = nullptr);
+    ~TabBar() override;
+
+    int appendTab();
+    int appendInactiveTab(const QUrl &url, bool pinned = false);
+    int insertInactiveTab(int index, const QUrl &url, bool pinned = false);
+    void removeTab(int index, int selectIndex = -1);
+    void forceRemoveTab(int index);
+    void setCurrentUrl(const QUrl &url);
+    void closeTab(const QUrl &url);
+
+    bool isTabValid(int index) const;
+    QUrl tabUrl(int index) const;
+    QString tabAlias(int index) const;
+    void setTabAlias(int index, const QString &alias);
+    QString tabUniqueId(int index) const;
+    QVariant tabUserData(int index, const QString &key) const;
+    void setTabUserData(int index, const QString &key, const QVariant &userData);
+    bool isInactiveTab(int index) const;
+    bool isPinned(int index) const;
+    QMarginsF tabVisualMargins(int index) const;
+    bool hasDragPreviewTab() const;
+    void ensureLayoutUpdated();
+    QRect visibleTabRect(int index) const;
+    QRect tabViewportRect() const;
+
+public Q_SLOTS:
+    void activateNextTab();
+    void activatePreviousTab();
+    void updateTabName(int index);
+
+Q_SIGNALS:
+    void currentTabChanged(int oldIndex, int newIndex);
+    void requestNewWindow(const QUrl &url);
+    void newTabCreated();
+    void requestCreateView(const QString &uniqueId);
+    void tabAboutToRemove(int oldIndex, int nextIndex);
+    void viewportScrolled();
+
+    // Live position feedback while a tab is being moved within this strip:
+    // tabDragStarted fires when DTK's floating snapshot becomes visible,
+    // tabDragMoved carries the snapshot's geometry in the TabBar-local
+    // coordinates (same system as tabRect()) on every Move event, and
+    // tabDragEnded fires when the snapshot is hidden after the move is done.
+    void tabDragStarted(int index);
+    void tabDragMoved(const QRect &rect);
+    void tabDragEnded();
+
+protected:
+    void paintTab(QPainter *painter, int index, const QStyleOptionTab &option) const override;
+    QSize tabSizeHint(int index) const override;
+    QSize minimumTabSizeHint(int index) const override;
+    QSize maximumTabSizeHint(int index) const override;
+    QMimeData *createMimeDataFromTab(int index, const QStyleOptionTab &option) const override;
+    QPixmap createDragPixmapFromTab(int index, const QStyleOptionTab &option, QPoint *hotspot) const override;
+    bool canInsertFromMimeData(int index, const QMimeData *source) const override;
+    void insertFromMimeData(int index, const QMimeData *source) override;
+    void insertFromMimeDataOnDragEnter(int index, const QMimeData *source) override;
+
+    bool eventFilter(QObject *obj, QEvent *e) override;
+    void mousePressEvent(QMouseEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
+
+private:
+    TabBarPrivate *const d;
+};
+}
+
+#endif   // TABBAR_H

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,13 +6,15 @@
 #define BASICSTATUSBAR_P_H
 
 #include <dfm-base/dfm_base_global.h>
-#include <dfm-base/utils/filestatisticsjob.h>
+#include <dfm-base/utils/filescanner.h>
 
 #include <DAnchors>
 #include <DTipLabel>
 
 #include <QObject>
 #include <QString>
+#include <QPointer>
+#include <QSet>
 
 class QLabel;
 class QHBoxLayout;
@@ -28,6 +30,7 @@ class BasicStatusBarPrivate : public QObject
 
 public:
     explicit BasicStatusBarPrivate(BasicStatusBar *qq);
+    ~BasicStatusBarPrivate() override;
 
     void initFormatStrings();
 
@@ -35,8 +38,9 @@ public:
     void initLayout();
 
     void calcFolderContains(const QList<QUrl> &folderList);
-    void initJobConnection();
     void discardCurrentJob();
+    void initJobConnection(FileScanner *job, quint64 generation);
+    void retireJob(FileScanner *job);
 
     QString onlyOneItemCounted;
     QString counted;
@@ -60,9 +64,11 @@ public:
     DTK_WIDGET_NAMESPACE::DTipLabel *tip = nullptr;
 
 
-    QSharedPointer<FileStatisticsJob> fileStatisticsJog;
-    bool isJobDisconnect = true;
-    QList<QSharedPointer<FileStatisticsJob>> waitDeleteJobList {};
+    QPointer<FileScanner> fileStatisticsJog;
+    QSet<FileScanner *> retiredJobs;
+    QSet<FileScanner *> finishedJobs;
+    quint64 scanGeneration = 0;
+    static constexpr int kMaxRetiredJobs = 2;
 };
 
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,21 +10,16 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QDBusInterface>
 #include <QDBusServiceWatcher>
+#include <QFileInfo>
 
-#ifdef COMPILE_ON_V20
-#    define BluetoothService "com.deepin.daemon.Bluetooth"
-#    define BluetoothPath "/com/deepin/daemon/Bluetooth"
-#    define BluetoothInterface "com.deepin.daemon.Bluetooth"
-#else
-#    define BluetoothService "org.deepin.dde.Bluetooth1"
-#    define BluetoothPath "/org/deepin/dde/Bluetooth1"
-#    define BluetoothInterface "org.deepin.dde.Bluetooth1"
-#endif
+#define BluetoothService "org.deepin.dde.Bluetooth1"
+#define BluetoothPath "/org/deepin/dde/Bluetooth1"
+#define BluetoothInterface "org.deepin.dde.Bluetooth1"
+#define ControlcenterService "org.deepin.dde.ControlCenter1"
+#define ControlcenterPath "/org/deepin/dde/ControlCenter1"
+#define ControlcenterInterface "org.deepin.dde.ControlCenter1"
 
 #define BluetoothPage "bluetooth"
-#define ControlcenterService "com.deepin.dde.ControlCenter"
-#define ControlcenterPath "/com/deepin/dde/ControlCenter"
-#define ControlcenterInterface "com.deepin.dde.ControlCenter"
 
 using namespace dfmplugin_utils;
 
@@ -35,6 +30,22 @@ BluetoothManagerPrivate::BluetoothManagerPrivate(BluetoothManager *qq)
 {
     initInterface();
     initConnects();
+}
+
+BluetoothManagerPrivate::~BluetoothManagerPrivate()
+{
+    if (bluetoothInter) {
+        delete bluetoothInter;
+        bluetoothInter = nullptr;
+    }
+
+    if (watcher) {
+        if (watcher->isRunning()) {
+            watcher->future().cancel();
+        }
+        delete watcher;
+        watcher = nullptr;
+    }
 }
 
 /**
@@ -74,6 +85,7 @@ void BluetoothManagerPrivate::initInterface()
         delete bluetoothInter;
     bluetoothInter = new QDBusInterface(BluetoothService, BluetoothPath, BluetoothInterface,
                                         QDBusConnection::sessionBus(), q);
+    bluetoothInter->setTimeout(2000);
 }
 
 void BluetoothManagerPrivate::initConnects()
@@ -323,10 +335,23 @@ void BluetoothManagerPrivate::onTransferRemoved(const QString &file, const QDBus
 {
     Q_UNUSED(transferPath)
     Q_Q(BluetoothManager);
+    QString sessionPathStr = sessionPath.path();
+
     if (!done) {
-        Q_EMIT q->transferCancledByRemote(sessionPath.path());
+        // Extract filename from file path using string operations
+        int lastSlash = file.lastIndexOf('/');
+        QString filename = (lastSlash >= 0) ? file.mid(lastSlash + 1) : file;
+
+        QByteArray utf8Name = filename.toUtf8();
+        bool isTooLong = utf8Name.size() > NAME_MAX;
+
+        longFilenameFailures[sessionPathStr] = isTooLong;
+        fmWarning() << "bluetooth TransferRemoved: failed by long filename:" << isTooLong
+                    << " namelen=" << utf8Name.size() << " session=" << sessionPathStr;
+        Q_EMIT q->transferCancledByRemote(sessionPathStr);
     } else {
-        Q_EMIT q->fileTransferFinished(sessionPath.path(), file);
+        longFilenameFailures.remove(sessionPathStr);
+        Q_EMIT q->fileTransferFinished(sessionPathStr, file);
     }
 }
 
@@ -337,7 +362,9 @@ void BluetoothManagerPrivate::onObexSessionCreated(const QDBusObjectPath &sessio
 
 void BluetoothManagerPrivate::onObexSessionRemoved(const QDBusObjectPath &sessionPath)
 {
-    fmDebug() << sessionPath.path();
+    QString sessionPathStr = sessionPath.path();
+    longFilenameFailures.remove(sessionPathStr);
+    fmDebug() << sessionPathStr;
 }
 
 void BluetoothManagerPrivate::onObexSessionProgress(const QDBusObjectPath &sessionPath, qulonglong totalSize, qulonglong transferred, int currentIndex)
@@ -377,9 +404,8 @@ BluetoothManager *BluetoothManager::instance()
 void BluetoothManager::refresh()
 {
     Q_D(BluetoothManager);
-
     if (!d->bluetoothInter || !d->bluetoothInter->isValid()) {
-        fmCritical() << "bluetooth interface is not valid!!!";
+        fmCritical() << "bluetooth interface is not valid!!!" << d->bluetoothInter->lastError();
         return;
     }
 
@@ -424,7 +450,7 @@ QMap<QString, const BluetoothAdapter *> BluetoothManager::getAdapters() const
 }
 
 /**
- * @brief 打开控制中心的‘蓝牙’界面
+ * @brief 打开控制中心的'蓝牙'界面
  */
 void BluetoothManager::showBluetoothSettings()
 {
@@ -489,4 +515,10 @@ bool BluetoothManager::canSendBluetoothRequest()
     Q_D(BluetoothManager);
     auto transportable = d->bluetoothInter->property("Transportable");
     return transportable.isValid() ? transportable.toBool() : true;
+}
+
+bool BluetoothManager::isLongFilenameFailure(const QString &sessionPath) const
+{
+    Q_D(const BluetoothManager);
+    return d->longFilenameFailures.value(sessionPath, false);
 }

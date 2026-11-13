@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "dirsharemenuscene.h"
 #include "private/dirsharemenuscene_p.h"
 #include "utils/usersharehelper.h"
+#include "utils/anonymouspermissionmanager.h"
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/base/schemefactory.h>
@@ -31,6 +32,7 @@ void DirShareMenuScenePrivate::addShare(const QUrl &url)
     option.insert("Option_Key_Name", "DirShare");
     option.insert("Option_Key_ExtendViewExpand", true);
     option.insert("Option_Key_BasicInfoExpand", false);
+    option.insert("Option_Key_DisableCustomDialog", true);
 
     ViewIntiCallback initFun = { ShareControlWidget::setOption };
     option.insert("Option_Key_ViewInitCalback", QVariant::fromValue(initFun));
@@ -117,7 +119,8 @@ bool DirShareMenuScene::triggered(QAction *action)
         d->addShare(u);
         return true;
     } else if (key == ShareActionId::kActRemoveShareKey) {
-        UserShareHelperInstance->removeShareByPath(u.path());
+        QString filePath = u.path();
+        UserShareHelperInstance->removeShareByPath(filePath);
         return true;
     }
 

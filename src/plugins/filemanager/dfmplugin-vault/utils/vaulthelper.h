@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,7 +41,7 @@ public:
 
     QUrl pathToVaultVirtualUrl(const QString &path);
 
-    VaultState state(const QString &baseDir) const;
+    VaultState state(const QString &baseDir, bool useCache = true) const;
     bool updateState(VaultState curState);
 
     /*!
@@ -98,6 +98,8 @@ public slots:
     void unlockVaultDialog();
 
     void showRemoveVaultDialog();
+
+    void showResetPasswordDialog();
 
     void openWindow();
 

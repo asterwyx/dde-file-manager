@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,12 +13,17 @@ CollectionViewBroker::CollectionViewBroker(CollectionView *parent)
     : QObject(parent)
     , view(parent)
 {
-
+    view->setObjectName("CollectionView");
+    view->setAccessibleName("CollectionView");
 }
 
 void CollectionViewBroker::setView(CollectionView *v)
 {
     view = v;
+    if (view) {
+        view->setObjectName("CollectionView");
+        view->setAccessibleName("CollectionView");
+    }
     setParent(v);
 }
 

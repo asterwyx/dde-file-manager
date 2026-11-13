@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,10 +8,19 @@
 #include <dfm-base/dfm_base_global.h>
 
 #include <DMainWindow>
+#include <QList>
+#include <QUrl>
+#include <QVariantHash>
 
 DWIDGET_USE_NAMESPACE
 
 namespace dfmbase {
+
+// DetailSpace options keys
+namespace DetailSpaceOptions {
+inline constexpr char kAnimated[] = "animated";
+inline constexpr char kUserAction[] = "userAction";   // Whether this is a user-initiated action
+}
 
 class AbstractFrame;
 class FileManagerWindowPrivate;
@@ -39,6 +48,14 @@ public:
     AbstractFrame *workSpace() const;
     AbstractFrame *detailView() const;
 
+    // DetailSpace width management
+    void setDetailViewWidth(int width);
+    int detailViewWidth() const;
+    // DetailSpace visibility management with animation support
+    void showDetailSpace(const QVariantHash &options = QVariantHash());
+    void hideDetailSpace(const QVariantHash &options = QVariantHash());
+    bool isDetailSpaceVisible() const;
+
     void loadState();
     void saveState();
 
@@ -48,6 +65,8 @@ protected:
     void moveEvent(QMoveEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    bool event(QEvent *event) override;
 
 Q_SIGNALS:
     void aboutToOpen();
@@ -56,6 +75,9 @@ Q_SIGNALS:
     void currentUrlChanged(const QUrl &url);
     void currentViewStateChanged();
     void selectUrlChanged(const QList<QUrl> &urlList);
+    void aboutToPlaySplitterAnimation(int startValue, int endValue);
+    void windowSplitterWidthChanged(const QVariant &value);
+    void windowActived();
 
     // The following signals are used to send shortcut requests
     void reqRefresh();   // F5
@@ -76,6 +98,7 @@ Q_SIGNALS:
     void sideBarInstallFinished();
     void workspaceInstallFinished();
     void detailViewInstallFinished();
+    void detailSpaceVisibilityChanged(bool visible);
 
 private:
     void initializeUi();

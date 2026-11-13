@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,6 +26,9 @@ ShareFileInfo::~ShareFileInfo()
 QString ShareFileInfo::displayOf(const DisPlayInfoType type) const
 {
     if (DisPlayInfoType::kFileDisplayName == type) {
+        if (UrlRoute::isRootUrl(url))
+            return QObject::tr("My Shares");
+
         auto name = d->fileName();
         if (name.isEmpty())
             name = ProxyFileInfo::displayOf(type);
@@ -71,7 +74,7 @@ bool ShareFileInfo::canAttributes(const CanableInfoType type) const
     case FileCanType::kCanDrag:
         return false;
     case FileCanType::kCanRedirectionFileUrl:
-        return proxy;
+        return !proxy.isNull();
     default:
         return ProxyFileInfo::canAttributes(type);
     }

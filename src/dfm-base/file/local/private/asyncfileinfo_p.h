@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -21,8 +21,8 @@
 #include <QFuture>
 #include <QQueue>
 #include <QMimeType>
-#include <QReadWriteLock>
-#include <QReadLocker>
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace dfmbase {
 class AsyncFileInfoPrivate
@@ -35,53 +35,37 @@ public:
     std::atomic_bool queringAttribute { false };
     std::atomic_bool cacheingAttributes { false };
     std::atomic_bool needUpdateMediaInfo;
-    DFileInfo::MediaType mediaType { DFileInfo::MediaType::kGeneral};
+    DFileInfo::MediaType mediaType { DFileInfo::MediaType::kGeneral };
     char memrySeat[7];
     QSharedPointer<DFileInfo> dfmFileInfo { nullptr };   // dfm文件的信息
     QVariantHash extraProperties;   // 扩展属性列表
     QMap<DFileInfo::AttributeExtendID, QVariant> attributesExtend;   // 缓存的fileinfo 扩展信息
     QList<DFileInfo::AttributeExtendID> extendIDs;
     QMimeType mimeType;
-    QReadWriteLock lock;
-    QReadWriteLock iconLock;
+    mutable QMutex lock;
+    mutable QReadWriteLock iconLock;
     QIcon fileIcon;
     QSharedPointer<InfoDataFuture> mediaFuture { nullptr };
     InfoHelperUeserDataPointer fileCountFuture { nullptr };
     InfoHelperUeserDataPointer updateFileCountFuture { nullptr };
     QMap<FileInfo::FileInfoAttributeID, QVariant> cacheAsyncAttributes;
-    QReadWriteLock notifyLock;
+    mutable QMutex notifyLock;
     QMultiMap<QUrl, QString> notifyUrls;
-    quint64 tokenKey{0};
+    quint64 tokenKey { 0 };
     AsyncFileInfo *const q;
-    QReadWriteLock changesLock;
+    mutable QMutex changesLock;
     QList<FileInfo::FileInfoAttributeID> changesAttributes;
+    mutable QString fileIconName;
 
 public:
     explicit AsyncFileInfoPrivate(AsyncFileInfo *qq);
     virtual ~AsyncFileInfoPrivate();
-    QString sizeString(const QString &str) const
-    {
-        int begin_pos = str.indexOf('.');
 
-        if (begin_pos < 0)
-            return str;
-
-        QString size = str;
-
-        while (size.count() - 1 > begin_pos) {
-            if (!size.endsWith('0'))
-                return size;
-
-            size = size.left(size.count() - 1);
-        }
-
-        return size.left(size.count() - 1);
-    }
-    virtual QMimeType readMimeType(QMimeDatabase::MatchMode mode = QMimeDatabase::MatchDefault) const;
     QIcon defaultIcon();
 
 public:
     QString fileName() const;
+    QString baseName() const;
     QString completeBaseName() const;
     QString completeSuffix() const;
     QString iconName() const;
@@ -92,7 +76,6 @@ public:
     QString symLinkTarget() const;
     QUrl redirectedFileUrl() const;
     bool isExecutable() const;
-    bool isPrivate() const;
     bool canDelete() const;
     bool canTrash() const;
     bool canRename() const;
@@ -103,8 +86,8 @@ public:
     QMap<DFMIO::DFileInfo::AttributeExtendID, QVariant> mediaInfo(DFileInfo::MediaType type, QList<DFileInfo::AttributeExtendID> ids);
 
     FileInfo::FileType fileType() const;
-    int cacheAllAttributes();
-    bool inserAsyncAttribute(const FileInfo::FileInfoAttributeID id, const QVariant &value);
+    int cacheAllAttributes(const QString &attributes = QString());
+    bool insertAsyncAttribute(const FileInfo::FileInfoAttributeID id, const QVariant &value);
     void fileMimeTypeAsync(QMimeDatabase::MatchMode mode = QMimeDatabase::MatchDefault);
     QMimeType mimeTypes(const QString &filePath, QMimeDatabase::MatchMode mode = QMimeDatabase::MatchDefault,
                         const QString &inod = QString(), const bool isGvfs = false);
@@ -113,26 +96,9 @@ public:
     QIcon updateIcon();
     void updateMediaInfo(const DFileInfo::MediaType type, const QList<DFileInfo::AttributeExtendID> &ids);
     bool hasAsyncAttribute(FileInfo::FileInfoAttributeID key);
+    void updateFileIconName();
 };
 
-AsyncFileInfoPrivate::AsyncFileInfoPrivate(AsyncFileInfo *qq)
-    : q(qq)
-{
-}
-
-AsyncFileInfoPrivate::~AsyncFileInfoPrivate()
-{
-}
-
-QMimeType AsyncFileInfoPrivate::readMimeType(QMimeDatabase::MatchMode mode) const
-{
-    QUrl url = q->urlOf(UrlInfoType::kUrl);
-    if (dfmbase::FileUtils::isLocalFile(url))
-        return mimeDb.mimeTypeForUrl(url);
-    else
-        return mimeDb.mimeTypeForFile(UrlRoute::urlToPath(url),
-                                      mode);
-}
 }
 Q_DECLARE_METATYPE(DFMBASE_NAMESPACE::AsyncFileInfoPrivate *)
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -24,6 +24,9 @@ class Search : public dpf::Plugin
 
     // signal events
     DPF_EVENT_REG_SIGNAL(signal_ReportLog_Commit)
+
+    // hook events
+    DPF_EVENT_REG_HOOK(hook_Url_IsSubFile)
 
 public:
     virtual void initialize() override;

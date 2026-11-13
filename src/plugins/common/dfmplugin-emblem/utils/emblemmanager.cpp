@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -33,35 +33,89 @@ bool EmblemManager::paintEmblems(int role, const FileInfoPointer &info, QPainter
     Q_ASSERT(painter);
     Q_ASSERT(paintArea);
 
-    painter->setRenderHints(QPainter::SmoothPixmapTransform);
-
     if (role != kItemIconRole || info.isNull())
         return false;
+    QList<QIcon> emblems;
+    const auto &infoEmblems = info->extendAttributes(ExtInfoType::kFileEmblems);
+    if (infoEmblems.isValid()) {
+        emblems = infoEmblems.value<QList<QIcon>>();
+        const QUrl &url = info->urlOf(UrlInfoType::kUrl);
+        if (!helper->isExtEmblemProhibited(info, url)) {
+            helper->pending(info);
+            QList<QIcon> tmpEmblems;
+            EmblemEventSequence::instance()->doFetchExtendEmblems(url, &tmpEmblems);
+        }
+    } else {
+        // add system emblem icons
+        emblems = helper->systemEmblems(info);
 
-    // add system emblem icons
-    QList<QIcon> emblems { helper->systemEmblems(info) };
+        //  only paitn system emblem icons if url is prohibited
+        const QUrl &url = info->urlOf(UrlInfoType::kUrl);
+        if (!helper->isExtEmblemProhibited(info, url)) {
+            // add gio embelm icons
+            helper->pending(info);
+            const auto &gioEmblems = helper->gioEmblemIcons(url);
+            if (emblems.isEmpty()) {
+                emblems = gioEmblems;
+            } else if (emblems.size() < gioEmblems.size()) {
+                // Ensure that the custom emblems do not affect the display position by the system emblems
+                emblems.append(gioEmblems.mid(emblems.size()));
+            }
 
-    //  only paitn system emblem icons if url is prohibited
-    const QUrl &url = info->urlOf(UrlInfoType::kUrl);
-    if (!helper->isExtEmblemProhibited(info, url)) {
-        // add gio embelm icons
-        helper->pending(info);
-        emblems.append(helper->gioEmblemIcons(url));
+            // add custom emblem icons
+            EmblemEventSequence::instance()->doFetchCustomEmblems(url, &emblems);
+            // add extension lib emblem icons
+            EmblemEventSequence::instance()->doFetchExtendEmblems(url, &emblems);
+        }
 
-        // add custom emblem icons
-        EmblemEventSequence::instance()->doFetchCustomEmblems(url, &emblems);
-        // add extension lib emblem icons
-        EmblemEventSequence::instance()->doFetchExtendEmblems(url, &emblems);
+        info->setExtendedAttributes(ExtInfoType::kFileEmblems, QVariant::fromValue(emblems));
     }
 
     if (emblems.isEmpty())
         return false;
 
+    painter->setRenderHints(QPainter::SmoothPixmapTransform);
+
     const QList<QRectF> &paintRects = helper->emblemRects(*paintArea);
     for (int i = 0; i < qMin(paintRects.count(), emblems.count()); ++i) {
         if (emblems.at(i).isNull())
             continue;
-        emblems.at(i).paint(painter, paintRects.at(i).toRect());
+        // NOTE: for some special icons, the QIcon::paint function will cast lots of cpu resource.
+        // so use the painter drawPixmap function to paint the emblems.
+        const QRect emblemRect = paintRects.at(i).toRect();
+        if (emblemRect.isEmpty())
+            continue;
+
+        const qreal dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
+        const QSize deviceSize(qMax(1, qRound(emblemRect.width() * dpr)),
+                               qMax(1, qRound(emblemRect.height() * dpr)));
+
+        QPixmap emblemPix = emblems.at(i).pixmap(deviceSize);
+        if (emblemPix.isNull())
+            continue;
+
+        emblemPix.setDevicePixelRatio(dpr);
+
+        const QSizeF logicalSize = emblemPix.deviceIndependentSize();
+        const QSizeF targetLogicalSize = emblemRect.size();
+        const bool logicalSizeMismatched
+                = qAbs(logicalSize.width() - targetLogicalSize.width()) > 0.5
+                || qAbs(logicalSize.height() - targetLogicalSize.height()) > 0.5;
+
+        // Keep the original crisp HiDPI path for icons that already honor the
+        // requested device-pixel size. Some fixed-size theme PNG emblems used
+        // by extensions may instead return a larger bucketed pixmap (for
+        // example 64x64), which becomes oversized after assigning fractional
+        // DPR. Normalize only those mismatched pixmaps back to the requested
+        // device size.
+        if (logicalSizeMismatched) {
+            emblemPix = emblemPix.scaled(deviceSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            emblemPix.setDevicePixelRatio(dpr);
+        }
+
+        const qreal ax = qRound(emblemRect.x() * dpr) / dpr;
+        const qreal ay = qRound(emblemRect.y() * dpr) / dpr;
+        painter->drawPixmap(QPointF(ax, ay), emblemPix);
     }
 
     return true;

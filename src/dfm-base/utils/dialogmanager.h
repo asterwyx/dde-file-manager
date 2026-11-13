@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,8 +12,10 @@
 
 #include <dfm-mount/base/dmount_global.h>
 
-#include <QObject>
+#include <DSettingsWidgetFactory>
 #include <DDialog>
+
+#include <QObject>
 
 using namespace DTK_NAMESPACE::Widget;
 
@@ -32,11 +34,6 @@ public:
     static DialogManager *instance();
 
 public:
-    enum MessageType {
-        kMsgInfo = 1,
-        kMsgWarn = 2,
-        kMsgErr = 3
-    };
     enum OperateType {
         kMount,
         kUnmount,
@@ -51,11 +48,13 @@ public:
     void showNoPermissionDialog(const QList<QUrl> &urls);
     void showCopyMoveToSelfDialog();
 
-    int showMessageDialog(MessageType messageLevel, const QString &title, const QString &message = "", QString btnTxt = tr("Confirm", "button"));
+    int showMessageDialog(const QString &title, const QString &message = "", QString btnTxt = tr("Confirm", "button"));
+    int showMessageDialog(const QString &title, const QString &message, const QStringList &btnTxtList);
 
     void addTask(const JobHandlePointer task);
 
     void showSetingsDialog(DFMBASE_NAMESPACE::FileManagerWindow *window);
+    void showSetingsDialog(DFMBASE_NAMESPACE::FileManagerWindow *window, const QString &groupKey);
 
     bool askForFormat();
     QString askPasswordForLockedDevice(const QString &devName);
@@ -68,6 +67,7 @@ public:
     int showNormalDeleteConfirmDialog(const QList<QUrl> &urls);
 
     void showRestoreFailedDialog(const int count);
+    void showOperationFailedDialog(const QMap<QUrl, QString> &failedInfo);
     int showRestoreDeleteFilesDialog(const QList<QUrl> &urlList);
 
     // rename
@@ -81,14 +81,18 @@ public:
     int showAskIfAddExcutableFlagAndRunDialog();
     void showDeleteSystemPathWarnDialog(quint64 winId);
 
+    // 注册自定义控件创建器
+    void registerSettingWidget(const QString &viewType,
+                               std::function<DSettingsWidgetFactory::WidgetCreateHandler> handler);
+
 private:
     explicit DialogManager(QObject *parent = nullptr);
     ~DialogManager();
 
     TaskDialog *taskdialog = nullptr;   // 文件任务进度和错误处理弹窗
-    QIcon infoIcon;
-    QIcon warningIcon;
-    QIcon errorIcon;
+
+    // 存储自定义控件创建器的映射
+    QMap<QString, std::function<DSettingsWidgetFactory::WidgetCreateHandler>> settingWidgetCreators;
 };
 
 }

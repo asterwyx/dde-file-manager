@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+﻿// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -33,6 +33,7 @@ MasteredMediaDirIterator::MasteredMediaDirIterator(const QUrl &url,
     QString id { DeviceUtils::getBlockDeviceId(devFile) };
     auto &&map = DevProxyMng->queryBlockInfo(id);
     mntPoint = qvariant_cast<QString>(map[DeviceProperty::kMountPoint]);
+    fmDebug() << "Mount point for device" << devFile << "is:" << mntPoint;
 
     QString stagingPath { OpticalHelper::localStagingFile(url).path() };
     OpticalHelper::createStagingFolder(devFile);
@@ -43,6 +44,7 @@ MasteredMediaDirIterator::MasteredMediaDirIterator(const QUrl &url,
 
     bool opticalBlank { qvariant_cast<bool>(map[DeviceProperty::kOpticalBlank]) };
     if (opticalBlank) {
+        fmInfo() << "Optical disc is blank, using staging iterator only for device:" << devFile;
         discIterator.clear();
         return;
     }
@@ -112,8 +114,6 @@ const FileInfoPointer MasteredMediaDirIterator::fileInfo() const
         infoTrans->setExtendedAttributes(ExtInfoType::kFileIsHid, isHidden);
         infoTrans->setExtendedAttributes(ExtInfoType::kFileLocalDevice, false);
         infoTrans->setExtendedAttributes(ExtInfoType::kFileCdRomDevice, false);
-        emit InfoCacheController::instance().removeCacheFileInfo({ url });
-        emit InfoCacheController::instance().cacheFileInfo(url, infoTrans);
     } else {
         fmWarning() << "MasteredMediaFileInfo: info is nullptr, url = " << url;
         //bug 64941, DVD+RW 只擦除文件系统部分信息，而未擦除全部，有垃圾数据，所以需要判断文件的有效性

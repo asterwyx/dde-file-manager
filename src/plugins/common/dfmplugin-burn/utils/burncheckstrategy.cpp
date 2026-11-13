@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,7 @@
 #include "burnhelper.h"
 
 #include <QDebug>
+#include <linux/limits.h>
 
 namespace dfmplugin_burn {
 
@@ -15,8 +16,8 @@ static constexpr int kMaxCommontFilePathBytes { 1024 };
 
 static constexpr int kMaxISO9660FileNameSize { 32 };
 
-static constexpr int kMaxJolietFileNameSize { 64 };
-static constexpr int kMaxJolietFilePathSize { 120 };
+static constexpr int kMaxJolietFileNameSize { 103 };
+static constexpr int kMaxJolietFilePathSize { 800 };
 
 BurnCheckStrategy::BurnCheckStrategy(const QString &path, QObject *parent)
     : QObject(parent), currentStagePath(path)
@@ -66,7 +67,7 @@ bool BurnCheckStrategy::validFile(const QFileInfo &info)
 
     QString absoluteFilePathWithStagePath { info.absoluteFilePath() };
     const QString &fileName { info.fileName() };
-    const QString &absoluteFilePath { QDir::separator() + absoluteFilePathWithStagePath.remove(currentStagePath) };
+    const QString &absoluteFilePath { absoluteFilePathWithStagePath.remove(currentStagePath) };
     invalidName = fileName;
 
     if (!validFileNameCharacters(fileName)) {
@@ -125,7 +126,11 @@ bool BurnCheckStrategy::validComontFilePathBytes(const QString &filePath)
 
 bool BurnCheckStrategy::validCommonFilePathDeepLength(const QString &filePath)
 {
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     return filePath.split(QDir::separator(), QString::SkipEmptyParts).size() <= kMaxCommonDirDeepLength;
+#else
+    return filePath.split(QDir::separator(), Qt::SkipEmptyParts).size() <= kMaxCommonDirDeepLength;
+#endif
 }
 
 bool BurnCheckStrategy::validFileNameCharacters(const QString &fileName)
@@ -190,12 +195,15 @@ JolietCheckStrategy::JolietCheckStrategy(const QString &path, QObject *parent)
 
 bool JolietCheckStrategy::validFileNameCharacters(const QString &fileName)
 {
-    return fileName.size() < kMaxJolietFileNameSize;
+    // joliet_long_names 扩展，将 joliet 对文件名的限制从 64 字符提升到 103 字符。
+    // 但在 libisofs 中，文件名长度又受 POSIX 标准中 NAME_MAX(255字节) 的限制。
+    // 因此，该扩展下需要同时满足两个条件的文件名，在刻录后才不会被截断。
+    return fileName.size() <= kMaxJolietFileNameSize && fileName.toUtf8().size() <= NAME_MAX;
 }
 
 bool JolietCheckStrategy::validFilePathCharacters(const QString &filePath)
 {
-    return filePath.size() < kMaxJolietFilePathSize;
+    return filePath.size() <= kMaxJolietFilePathSize;
 }
 
 /*!

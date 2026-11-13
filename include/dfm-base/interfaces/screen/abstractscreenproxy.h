@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -39,6 +39,7 @@ public:
 
 protected:
     virtual void processEvent() = 0;
+    virtual bool validateEvent(Event event) const;
 
 protected:
     void appendEvent(Event);

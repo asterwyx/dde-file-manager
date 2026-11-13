@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,7 +13,7 @@
 #include "events/shareeventscaller.h"
 #include "events/shareeventhelper.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/dfm_global_defines.h>
 #include <dfm-base/base/urlroute.h>
@@ -25,13 +25,14 @@
 #include <DMenu>
 
 DWIDGET_USE_NAMESPACE
+DFMGLOBAL_USE_NAMESPACE
 
 using ContextMenuCallback = std::function<void(quint64 windowId, const QUrl &url, const QPoint &globalPos)>;
 Q_DECLARE_METATYPE(QList<QUrl> *)
 Q_DECLARE_METATYPE(ContextMenuCallback);
 
 namespace dfmplugin_myshares {
-DFM_LOG_REISGER_CATEGORY(DPMYSHARES_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPMYSHARES_NAMESPACE)
 
 void MyShares::initialize()
 {
@@ -94,17 +95,19 @@ void MyShares::onWindowOpened(quint64 winId)
     if (window->sideBar())
         addToSidebar();
     else
-        connect(window, &FileManagerWindow::sideBarInstallFinished, this, [this] { addToSidebar(); }, Qt::DirectConnection);
+        connect(
+                window, &FileManagerWindow::sideBarInstallFinished, this, [this] { addToSidebar(); }, Qt::DirectConnection);
 
     auto searchPlugin { DPF_NAMESPACE::LifeCycle::pluginMetaObj("dfmplugin-search") };
     if (searchPlugin && searchPlugin->pluginState() == DPF_NAMESPACE::PluginMetaObject::kStarted) {
         regMyShareToSearch();
     } else {
-        connect(DPF_NAMESPACE::Listener::instance(), &DPF_NAMESPACE::Listener::pluginStarted, this, [this](const QString &iid, const QString &name) {
-            Q_UNUSED(iid)
-            if (name == "dfmplugin-search")
-                regMyShareToSearch();
-        },
+        connect(
+                DPF_NAMESPACE::Listener::instance(), &DPF_NAMESPACE::Listener::pluginStarted, this, [this](const QString &iid, const QString &name) {
+                    Q_UNUSED(iid)
+                    if (name == "dfmplugin-search")
+                        regMyShareToSearch();
+                },
                 Qt::DirectConnection);
     }
 }
@@ -182,6 +185,7 @@ void MyShares::followEvents()
 
     // file operation
     dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_OpenFileInPlugin", ShareFileHelper::instance(), &ShareFileHelper::openFileInPlugin);
+    dpfHookSequence->follow("dfmplugin_fileoperations", "hook_Operation_SetPermission", ShareFileHelper::instance(), &ShareFileHelper::setPermissionHandle);
 }
 
 void MyShares::bindWindows()
@@ -209,6 +213,11 @@ void MyShares::doInitialize()
 
     dpfSignalDispatcher->subscribe("dfmplugin_dirshare", "signal_Share_ShareAdded", this, &MyShares::onShareAdded);
     dpfSignalDispatcher->subscribe("dfmplugin_dirshare", "signal_Share_ShareRemoved", this, &MyShares::onShareRemoved);
+
+    QVariantMap property;
+    property[ViewCustomKeys::kSupportTreeMode] = false;
+    dpfSlotChannel->push("dfmplugin_workspace", "slot_View_SetCustomViewProperty", ShareUtils::scheme(), property);
+    dpfSlotChannel->push("dfmplugin_titlebar", "slot_Custom_Register", ShareUtils::scheme(), property);
 
     followEvents();
     bindWindows();

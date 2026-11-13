@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vaultpropertydialog.h"
 
 #include <dfm-base/base/schemefactory.h>
+#include <dfm-base/utils/iconutils.h>
 
 #include <QPalette>
 #include <denhancedwidget.h>
@@ -21,6 +22,7 @@ VaultPropertyDialog::VaultPropertyDialog(QWidget *parent)
     : DDialog(parent),
       platformWindowHandle(new DPlatformWindowHandle(this, this))
 {
+    fmDebug() << "Vault: Creating property dialog";
     platformWindowHandle->setEnableSystemResize(true);
     setFixedWidth(kDialogWidth);
     initInfoUI();
@@ -29,14 +31,16 @@ VaultPropertyDialog::VaultPropertyDialog(QWidget *parent)
 
 VaultPropertyDialog::~VaultPropertyDialog()
 {
+    fmDebug() << "Vault: Property dialog destroyed";
 }
 
 void VaultPropertyDialog::initInfoUI()
 {
+    fmDebug() << "Vault: Initializing property dialog UI";
     scrollArea = new QScrollArea();
     scrollArea->setObjectName("PropertyDialog-QScrollArea");
     QPalette palette = scrollArea->viewport()->palette();
-    palette.setBrush(QPalette::Background, Qt::NoBrush);
+    palette.setBrush(QPalette::Window, Qt::NoBrush);
     scrollArea->viewport()->setPalette(palette);
     scrollArea->setFrameShape(QFrame::Shape::NoFrame);
     scrollArea->setWidgetResizable(true);
@@ -65,9 +69,9 @@ void VaultPropertyDialog::createHeadUI(const QUrl &url)
     fileIconLabel->setFixedHeight(128);
     FileInfoPointer info = InfoFactory::create<FileInfo>(url);
     if (!info.isNull())
-        fileIconLabel->setPixmap(info->fileIcon().pixmap(128, 128));
+        fileIconLabel->setPixmap(IconUtils::hiDpiPixmap(info->fileIcon(), QSize(128, 128), this));
 
-    fileNameLabel = new QLabel(tr("My Vault"), this);
+    fileNameLabel = new QLabel(tr("File Vault"), this);
 
     QVBoxLayout *vlayout = new QVBoxLayout;
     vlayout->setContentsMargins(10, 10, 10, 10);
@@ -135,6 +139,7 @@ void VaultPropertyDialog::processHeight(int height)
 
 void VaultPropertyDialog::selectFileUrl(const QUrl &url)
 {
+    fmDebug() << "Vault: Selecting file URL for property dialog:" << url.toString();
     createHeadUI(url);
     createBasicWidget(url);
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,13 +27,16 @@ class InfoCachePrivate
     QAtomicInt status { kCacheMain };   // 当前状态缓存的状态
     QHash<QUrl, FileInfoPointer> mainCache;   // 主信息缓存
     QHash<QUrl, FileInfoPointer> copyCache;   // 副信息缓存
-    QReadWriteLock mianLock;
+    QReadWriteLock mainLock;
     QReadWriteLock copyLock;
 
     // 时间排序url,利用map的有序性，来处理时间到了要移除的url
-    QMap<QUrl, QString> urlTimeSortMap;
+    QHash<QUrl, QString> urlTimeSortHash;
     QMap<QString, QUrl> timeToUrlMap;
 
+    // 时间排序url,利用map的有序性，来处理时间到了要移除的url
+    QHash<QUrl, QString> urlTimeSortWatcherHash;
+    QMap<QString, QUrl> timeToUrlWatcherMap;
     std::atomic_bool cacheWorkerStoped { false };
 
 public:

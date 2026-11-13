@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,15 +9,28 @@
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/utils/fileutils.h>
+#include <dfm-base/utils/sortfileinfoutils.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
+#include <dfm-base/utils/protocolutils.h>
+#include <dfm-base/mimetype/mimetypedisplaymanager.h>
 
 #include <dfm-io/denumerator.h>
 #include <dfm-io/dfmio_utils.h>
 
-#include <functional>
+#include <QDir>
+#include <QFile>
+#include <QRegularExpression>
+
+#include <cerrno>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <linux/stat.h>
+#include <unistd.h>
 
 USING_IO_NAMESPACE
 using namespace dfmbase;
+using namespace GlobalDConfDefines::ConfigPath;
 
 namespace DConfigKeys {
 static constexpr char kAllAsync[] { "dfm.iterator.allasync" };
@@ -26,7 +39,8 @@ static constexpr char kAllAsync[] { "dfm.iterator.allasync" };
 LocalDirIteratorPrivate::LocalDirIteratorPrivate(const QUrl &url, const QStringList &nameFilters,
                                                  QDir::Filters filters, QDirIterator::IteratorFlags flags,
                                                  LocalDirIterator *q)
-    : q(q)
+    : q(q),
+      rootPath(UrlRoute::urlToPath(url))
 {
     const QUrl &urlReally = QUrl::fromLocalFile(UrlRoute::urlToPath(url));
     dfmioDirIterator.reset(new DFMIO::DEnumerator(urlReally, nameFilters,
@@ -59,27 +73,29 @@ FileInfoPointer LocalDirIteratorPrivate::fileInfo(const QSharedPointer<DFileInfo
     } else {
         isHidden = hideFileList.contains(fileName);
     }
+
     auto targetPath = dfmInfo->attribute(dfmio::DFileInfo::AttributeID::kStandardSymlinkTarget).toString();
-    if (FileUtils::isLocalDevice(url) && (targetPath.isEmpty() || FileUtils::isLocalDevice(QUrl::fromLocalFile(targetPath)))) {
-        info = QSharedPointer<SyncFileInfo>(new SyncFileInfo(url, dfmInfo));
+    if (ProtocolUtils::isLocalFile(url) && (targetPath.isEmpty() || ProtocolUtils::isLocalFile(QUrl::fromLocalFile(targetPath)))) {
+        info = QSharedPointer<SyncFileInfo>(new SyncFileInfo(url));
     } else {
         info = QSharedPointer<AsyncFileInfo>(new AsyncFileInfo(url, dfmInfo));
         info->setExtendedAttributes(ExtInfoType::kFileIsHid, isHidden);
-        info.dynamicCast<AsyncFileInfo>()->cacheAsyncAttributes();
+        info.dynamicCast<AsyncFileInfo>()->cacheAsyncAttributes(q->property("QueryAttributes").toString());
     }
 
-    auto infoTrans = InfoFactory::transfromInfo<FileInfo>(url.scheme(), info);
-
-    if (infoTrans) {
-        infoTrans->setExtendedAttributes(ExtInfoType::kFileIsHid, isHidden);
-        infoTrans->setExtendedAttributes(ExtInfoType::kFileCdRomDevice, isCdRomDevice);
-        emit InfoCacheController::instance().removeCacheFileInfo({url});
-        emit InfoCacheController::instance().cacheFileInfo(url, infoTrans);
+    if (info) {
+        if (!q->property("QueryAttributes").toString().isEmpty()
+            && q->property("QueryAttributes").toString() != "*") {
+            info->setExtendedAttributes(ExtInfoType::kFileNeedUpdate, true);
+            info->setExtendedAttributes(ExtInfoType::kFileNeedTransInfo, true);
+        }
+        info->setExtendedAttributes(ExtInfoType::kFileIsHid, isHidden);
+        info->setExtendedAttributes(ExtInfoType::kFileCdRomDevice, isCdRomDevice);
     } else {
         qCWarning(logDFMBase) << "info is nullptr url = " << url;
     }
 
-    return infoTrans;
+    return info;
 }
 
 QList<FileInfoPointer> LocalDirIteratorPrivate::fileInfos()
@@ -134,6 +150,12 @@ QUrl LocalDirIterator::next()
  */
 bool LocalDirIterator::hasNext() const
 {
+    if (!d->initQuerry && d->dfmioDirIterator) {
+        d->initQuerry = true;
+        auto querry = property("QueryAttributes").toString();
+        if (!querry.isEmpty())
+            d->dfmioDirIterator->setQueryAttributes(querry);
+    }
     if (d->dfmioDirIterator)
         return d->dfmioDirIterator->hasNext();
 
@@ -142,6 +164,7 @@ bool LocalDirIterator::hasNext() const
 
 void LocalDirIterator::close()
 {
+    d->canceled.storeRelease(true);
     if (d->dfmioDirIterator)
         d->dfmioDirIterator->cancel();
 }
@@ -156,7 +179,7 @@ QString LocalDirIterator::fileName() const
     if (path.isEmpty())
         return QString();
 
-    path = path.replace(QRegExp("/*/"), "/");
+    path = path.replace(QRegularExpression("/*/"), "/");
     if (path == "/")
         return QString();
 
@@ -203,7 +226,7 @@ void LocalDirIterator::cacheBlockIOAttribute()
     const QUrl &rootUrl = this->url();
     const QUrl &url = DFMIO::DFMUtils::buildFilePath(rootUrl.toString().toStdString().c_str(), ".hidden", nullptr);
     d->hideFileList = DFMIO::DFMUtils::hideListFromUrl(url);
-    d->isLocalDevice = FileUtils::isLocalDevice(rootUrl);
+    d->isLocalDevice = ProtocolUtils::isLocalFile(rootUrl);
     d->isCdRomDevice = FileUtils::isCdRomDevice(rootUrl);
 }
 
@@ -222,25 +245,44 @@ void LocalDirIterator::setArguments(const QVariantMap &args)
 
 QList<SortInfoPointer> LocalDirIterator::sortFileInfoList()
 {
-    if (!d->dfmioDirIterator)
+    if (d->rootPath.isEmpty())
         return {};
 
-    auto sortlist = d->dfmioDirIterator->sortFileInfoList();
-    QList<SortInfoPointer> wsortlist;
-    for (const auto &sortInfo : sortlist) {
-        SortInfoPointer tmp(new SortFileInfo);
-        tmp->setUrl(sortInfo->url);
-        tmp->setSize(sortInfo->filesize);
-        tmp->setFile(sortInfo->isFile);
-        tmp->setDir(sortInfo->isDir);
-        tmp->setHide(sortInfo->isHide);
-        tmp->setSymlink(sortInfo->isSymLink);
-        tmp->setReadable(sortInfo->isReadable);
-        tmp->setWriteable(sortInfo->isWriteable);
-        tmp->setExecutable(sortInfo->isExecutable);
-        wsortlist.append(tmp);
+    d->canceled.storeRelease(false);
+    const QSet<QString> hideList = SortInfoUtils::loadHideFileList(d->rootPath);
+
+    DIR *dir = ::opendir(QFile::encodeName(d->rootPath).constData());
+    if (!dir) {
+        qCWarning(logDFMBase) << "Failed to open directory:" << d->rootPath
+                              << "error:" << strerror(errno);
+        return {};
     }
-    return wsortlist;
+
+    QList<SortInfoPointer> sortList;
+    while (!d->canceled.loadAcquire()) {
+        errno = 0;
+        dirent *entry = ::readdir(dir);
+        if (!entry) {
+            // Distinguish between normal end-of-directory and I/O errors
+            if (errno != 0 && !d->canceled.loadAcquire()) {
+                qCWarning(logDFMBase) << "Failed to read directory" << d->rootPath
+                                      << "error:" << qt_error_string(errno);
+            }
+            break;
+        }
+
+        const QString fileName = QFile::decodeName(entry->d_name);
+        if (fileName == "." || fileName == "..")
+            continue;
+
+        auto info = SortInfoUtils::createSortInfo(d->rootPath, fileName, hideList);
+        if (info.isNull())
+            continue;
+        sortList.append(info);
+    }
+
+    ::closedir(dir);
+    return sortList;
 }
 
 bool LocalDirIterator::oneByOne()
@@ -257,18 +299,31 @@ bool LocalDirIterator::oneByOne()
     if (info)
         return !info->extendAttributes(ExtInfoType::kFileLocalDevice).toBool() || !d->dfmioDirIterator;
 
-    return !FileUtils::isLocalDevice(url()) || !d->dfmioDirIterator;
+    return !ProtocolUtils::isLocalFile(url()) || !d->dfmioDirIterator;
 }
 
 bool LocalDirIterator::initIterator()
 {
-    if (d->dfmioDirIterator)
-        return d->dfmioDirIterator->initEnumerator(oneByOne());
+    if (d->dfmioDirIterator) {
+        // When oneByOne() is false, sortFileInfoList() uses opendir/readdir
+        // directly and does not need the FTS tree.  Skipping initEnumerator(false)
+        // avoids an unnecessary fts_open() allocation that would otherwise leak
+        // because LocalDirIterator::sortFileInfoList() never calls fts_close().
+        if (!oneByOne())
+            return true;
+        return d->dfmioDirIterator->initEnumerator(true);
+    }
     return false;
 }
 
 DEnumeratorFuture *LocalDirIterator::asyncIterator()
 {
+    if (!d->initQuerry && d->dfmioDirIterator) {
+        d->initQuerry = true;
+        auto querry = property("QueryAttributes").toString();
+        if (!querry.isEmpty())
+            d->dfmioDirIterator->setQueryAttributes(querry);
+    }
     if (d->dfmioDirIterator)
         return d->dfmioDirIterator->asyncIterator();
     return nullptr;

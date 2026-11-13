@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,7 +25,7 @@ public:
     bool unlockVault(const QString &lockBaseDir, const QString &unlockFileDir, const QString &DSecureString);
     bool lockVault(QString unlockFileDir, bool isForced);
     bool createDirIfNotExist(QString path);
-    VaultState state(const QString &encryptBaseDir) const;
+    VaultState state(const QString &encryptBaseDir, bool useCache = true) const;
     bool updateState(VaultState curState);
 
     EncryptType encryptAlgoTypeOfGroupPolicy();

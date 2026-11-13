@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -18,15 +18,17 @@
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/utils/fileutils.h>
 #include <dfm-base/utils/iconutils.h>
+#include <dfm-base/utils/universalutils.h>
 
 #include <dfm-framework/dpf.h>
 
 #include <DApplication>
-#include <DApplicationHelper>
 
 #include <QPainter>
 #include <QScrollBar>
 #include <QPainterPath>
+
+#include <QFontMetricsF>
 
 #include <cmath>
 #include <mutex>
@@ -45,11 +47,14 @@ using namespace ddplugin_organizer;
 
 #define EDITOR_SHOW_SUFFIX "_d_whether_show_suffix"
 
-const int CollectionItemDelegate::kTextPadding = 2;
+const int CollectionItemDelegate::kTextPadding = 4;
 const int CollectionItemDelegate::kIconSpacing = 2;
 const int CollectionItemDelegate::kIconTopSpacing = 4;
 const int CollectionItemDelegate::kIconBackRadius = 18;
 const int CollectionItemDelegate::kIconRectRadius = 4;
+const int CollectionItemDelegate::kIconBackgroundMargin = 4;
+
+inline constexpr int kIconModeBackRadiusCoefficient = 16;
 
 CollectionItemDelegatePrivate::CollectionItemDelegatePrivate(CollectionItemDelegate *qq)
     : q(qq)
@@ -66,8 +71,15 @@ ElideTextLayout *CollectionItemDelegatePrivate::createTextlayout(const QModelInd
     QString name = showSuffix ? index.data(Global::ItemRoles::kItemFileDisplayNameRole).toString()
                               : index.data(Global::ItemRoles::kItemFileBaseNameOfRenameRole).toString();
     ElideTextLayout *layout = new ElideTextLayout(name);
+    int lineHeight = UniversalUtils::getTextLineHeight(index, q->parent()->fontMetrics());
+    // A monitor hotplug can leave the view without a usable font engine for a moment, and
+    // fontMetrics() then reports zero. A zero line height makes the layout place every line
+    // at the same position (overlapping names) and lets the text vanish, so fall back to
+    // the float metrics bound to the view.
+    if (lineHeight <= 0)
+        lineHeight = static_cast<int>(std::ceil(QFontMetricsF(q->parent()->font(), q->parent()).height()));
     layout->setAttribute(ElideTextLayout::kWrapMode, (uint)QTextOption::WrapAtWordBoundaryOrAnywhere);
-    layout->setAttribute(ElideTextLayout::kLineHeight, textLineHeight);
+    layout->setAttribute(ElideTextLayout::kLineHeight, lineHeight);
     layout->setAttribute(ElideTextLayout::kAlignment, Qt::AlignHCenter);
     if (painter) {
         layout->setAttribute(ElideTextLayout::kFont, painter->font());
@@ -147,17 +159,40 @@ void CollectionItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem
     // paint a translucent effect.
     painter->setOpacity(isTransparent(index) ? 0.3 : 1.0);
 
+    // 获取 iconName 用于 QPixmapCache 缓存
+    const auto iconName = index.data(Global::ItemRoles::kItemFileIconNameRole).toString();
+
     // get item paint geomerty
     // the method to get rect for each element is equal to paintGeomertys(option, index);
     {
-        // draw icon
+        // draw icon and background
         const QRect rIcon = iconRect(option.rect);
-        paintIcon(painter, indexOption.icon,
-                  { rIcon,
-                    Qt::AlignCenter,
-                    (option.state & QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled,
-                    QIcon::Off,
-                    isThumnailIconIndex(index) });   // why Enabled?
+        paintBackground(painter, indexOption, rIcon);
+        auto info = parent()->model()->fileInfo(index);
+        auto isThumbnail = IconPainterUtils::isThumbnailIcon(info);
+        const auto &pIcon = IconPainterUtils::paintIcon(painter, isThumbnail
+                                                      ? indexOption.icon
+                                                      : index.data(dfmbase::Global::ItemRoles::kItemFileIconRole).value<QIcon>(),
+                                                      { rIcon,
+                                                        Qt::AlignCenter,
+                                                        (option.state & QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled,
+                                                        QIcon::Off,
+                                                        isThumbnail,
+                                                        iconName,
+                                                        Global::ViewMode::kIconMode,
+                                                        IconPainterUtils::shouldSkipThumbnailFrame(info) });   // why Enabled?
+        // If the thumbnail drawing is empty, then redraw the file fileicon
+        if (!pIcon.has_value()) {
+            const QIcon &fileIcon = index.data(Global::ItemRoles::kItemFileIconRole).value<QIcon>();
+            IconPainterUtils::paintIcon(painter, fileIcon,
+                                        { rIcon,
+                                          Qt::AlignCenter,
+                                          (option.state & QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled,
+                                          QIcon::Off,
+                                          false,
+                                          "",
+                                          Global::ViewMode::kIconMode });   // why Enabled?
+        }
         // paint emblems to icon
         paintEmblems(painter, rIcon, parent()->model()->fileInfo(index));
 
@@ -326,10 +361,29 @@ QSize CollectionItemDelegate::paintDragIcon(QPainter *painter, const QStyleOptio
     initStyleOption(&indexOption, index);
 
     painter->setRenderHints(painter->renderHints() | QPainter::Antialiasing | QPainter::SmoothPixmapTransform, true);
-    return paintIcon(painter, indexOption.icon,
-                     { indexOption.rect, Qt::AlignCenter, QIcon::Normal,
-                       QIcon::Off, isThumnailIconIndex(index) })
-            .size();
+    // 获取 iconName 用于 QPixmapCache 缓存
+    const auto iconName = index.data(Global::ItemRoles::kItemFileIconNameRole).toString();
+    auto info = parent()->model()->fileInfo(index);
+
+    const auto &pIcon = IconPainterUtils::paintIcon(painter, indexOption.icon,
+                                                   { indexOption.rect, Qt::AlignCenter, QIcon::Normal,
+                                                     QIcon::Off, IconPainterUtils::isThumbnailIcon(info), iconName,
+                                                     Global::ViewMode::kIconMode,
+                                                     IconPainterUtils::shouldSkipThumbnailFrame(info) });
+    // If the thumbnail drawing is empty, then redraw the file fileicon
+    if (!pIcon.has_value()) {
+        const QIcon &fileIcon = index.data(Global::ItemRoles::kItemFileIconRole).value<QIcon>();
+        const auto &paintRect = IconPainterUtils::paintIcon(painter, fileIcon,
+                                          { indexOption.rect, Qt::AlignCenter, QIcon::Normal,
+                                            QIcon::Off, false, iconName, Global::ViewMode::kIconMode });
+        if (paintRect.has_value()) {
+            return paintRect->size();
+        } else {
+            return QSize();
+        }
+    }
+
+    return pIcon->size();
 }
 
 QList<QRect> CollectionItemDelegate::paintGeomertys(const QStyleOptionViewItem &option, const QModelIndex &index) const
@@ -378,18 +432,6 @@ QList<QRect> CollectionItemDelegate::paintGeomertys(const QStyleOptionViewItem &
     return geometries;
 }
 
-Qt::Alignment CollectionItemDelegate::visualAlignment(Qt::LayoutDirection direction, Qt::Alignment alignment)
-{
-    if (!(alignment & Qt::AlignHorizontal_Mask))
-        alignment |= Qt::AlignLeft;
-    if (!(alignment & Qt::AlignAbsolute) && (alignment & (Qt::AlignLeft | Qt::AlignRight))) {
-        if (direction == Qt::RightToLeft)
-            alignment ^= (Qt::AlignLeft | Qt::AlignRight);
-        alignment |= Qt::AlignAbsolute;
-    }
-    return alignment;
-}
-
 QList<QRectF> CollectionItemDelegate::elideTextRect(const QModelIndex &index, const QRect &rect, const Qt::TextElideMode &elideMode) const
 {
     // create text Layout.
@@ -411,20 +453,6 @@ bool CollectionItemDelegate::isTransparent(const QModelIndex &index) const
             return false;
 
         if (ClipBoard::instance()->clipboardFileUrlList().contains(file->urlOf(UrlInfoType::kUrl)))
-            return true;
-    }
-    return false;
-}
-
-bool CollectionItemDelegate::isThumnailIconIndex(const QModelIndex &index) const
-{
-    if (!index.isValid() || !parent() || !parent()->model())
-        return false;
-
-    FileInfoPointer info { parent()->model()->fileInfo(index) };
-    if (info) {
-        const auto &attribute { info->extendAttributes(ExtInfoType::kFileThumbnail) };
-        if (attribute.isValid() && !attribute.value<QIcon>().isNull())
             return true;
     }
     return false;
@@ -518,22 +546,6 @@ void CollectionItemDelegate::drawExpandText(QPainter *painter, const QStyleOptio
     painter->restore();
 }
 
-QPixmap CollectionItemDelegate::getIconPixmap(const QIcon &icon, const QSize &size,
-                                              qreal pixelRatio, QIcon::Mode mode, QIcon::State state)
-{
-    if (icon.isNull())
-        return QPixmap();
-
-    // 确保当前参数参入获取图片大小大于0
-    if (size.width() <= 0 || size.height() <= 0)
-        return QPixmap();
-
-    auto px = icon.pixmap(size, mode, state);
-    px.setDevicePixelRatio(pixelRatio);
-
-    return px;
-}
-
 CollectionView *CollectionItemDelegate::parent() const
 {
     return dynamic_cast<CollectionView *>(QObject::parent());
@@ -601,7 +613,7 @@ QRect CollectionItemDelegate::labelRect(const QRect &paintRect, const QRect &use
 {
     QRect lable = paintRect;
     // label rect is under the icon.
-    lable.setTop(usedRect.bottom());
+    lable.setTop(usedRect.bottom() + kIconBackgroundMargin);
 
     // minus text padding at left and right.
     lable.setWidth(paintRect.width() - 2 * kTextPadding);
@@ -626,11 +638,26 @@ QRect CollectionItemDelegate::textPaintRect(const QStyleOptionViewItem &option, 
 
 void CollectionItemDelegate::updateItemSizeHint() const
 {
-    d->textLineHeight = parent()->fontMetrics().height();
+    // A monitor hotplug rebuilds the desktop frame, and during that window the view may
+    // not resolve a usable font engine yet: QWidget::fontMetrics() then reports zero.
+    // Caching that zero collapses the item height and leaves the file name without any
+    // drawing room, so fall back to the float metrics and keep the last valid value.
+    int lineHeight = parent()->fontMetrics().height();
+    if (lineHeight <= 0)
+        lineHeight = static_cast<int>(std::ceil(QFontMetricsF(parent()->font(), parent()).height()));
+    if (lineHeight <= 0)
+        return;
+    d->textLineHeight = lineHeight;
     // old style
     int width = parent()->iconSize().width() * 17 / 10;
+    // Use UniversalUtils::getTextLineHeight for text area height to stay consistent
+    // with the layout engine (ElideTextLayout), which also uses it for per-line height.
+    // Without this, fractional scaling (e.g. 125%) causes ceil() in getTextLineHeight
+    // to produce a larger line height than fontMetrics().height(), making the available
+    // text space too small for 2 lines and collapsing multi-line names into 1 line.
+    int textLineHeight = UniversalUtils::getTextLineHeight(QString(), parent()->fontMetrics());
     int height = kIconTopSpacing + parent()->iconSize().height()
-            + kIconSpacing + kTextPadding + 2 * d->textLineHeight + kTextPadding;
+            + kIconSpacing + kTextPadding + 2 * textLineHeight + kTextPadding;
 
     // new style
     //    int textFontWidth = parent()->fontMetrics().width("中");
@@ -734,10 +761,10 @@ void CollectionItemDelegate::initStyleOption(QStyleOptionViewItem *option, const
 
     // multi-selected background
     if ((option->state & QStyle::State_HasFocus) && option->showDecorationSelected && model->selectedIndexes().size() > 1) {
-        option->palette.setColor(QPalette::Background, QColor("#0076F9"));
+        option->palette.setColor(QPalette::Window, QColor("#0076F9"));
         option->backgroundBrush = QColor("#0076F9");
     } else {   // normal
-        option->palette.setColor(QPalette::Background, QColor("#2da6f7"));
+        option->palette.setColor(QPalette::Window, QColor("#2da6f7"));
         option->backgroundBrush = QColor("#2da6f7");
     }
 
@@ -752,59 +779,6 @@ void CollectionItemDelegate::initStyleOption(QStyleOptionViewItem *option, const
     option->textElideMode = Qt::ElideLeft;
 }
 
-/*!
- * \brief paint icon
- * \param painter
- * \param icon: the icon to paint
- * \param rect: icon rect
- * \param alignment: alignment if icon
- * \param mode: icon mode (Normal, Disabled, Active, Selected )
- * \param state: The state for which a pixmap is intended to be used. (On, Off)
- */
-QRect CollectionItemDelegate::paintIcon(QPainter *painter, const QIcon &icon, const PaintIconOpts &opts)
-{
-    // Copy of QStyle::alignedRect
-    Qt::Alignment alignment { visualAlignment(painter->layoutDirection(), opts.alignment) };
-    const qreal pixelRatio = painter->device()->devicePixelRatioF();
-    const QPixmap &px = getIconPixmap(icon, opts.rect.size().toSize(), pixelRatio, opts.mode, opts.state);
-    qreal x = opts.rect.x();
-    qreal y = opts.rect.y();
-    qreal w = px.width() / px.devicePixelRatio();
-    qreal h = px.height() / px.devicePixelRatio();
-    if ((alignment & Qt::AlignVCenter) == Qt::AlignVCenter)
-        y += (opts.rect.size().height() - h) / 2.0;
-    else if ((alignment & Qt::AlignBottom) == Qt::AlignBottom)
-        y += opts.rect.size().height() - h;
-    if ((alignment & Qt::AlignRight) == Qt::AlignRight)
-        x += opts.rect.size().width() - w;
-    else if ((alignment & Qt::AlignHCenter) == Qt::AlignHCenter)
-        x += (opts.rect.size().width() - w) / 2.0;
-
-    if (opts.isThumb) {
-        painter->save();
-        painter->setRenderHints(painter->renderHints() | QPainter::Antialiasing | QPainter::SmoothPixmapTransform, true);
-
-        QRect backgroundRect { qRound(x), qRound(y), qRound(w), qRound(h) };
-        QRect imageRect { backgroundRect };
-        // 绘制带有阴影的背景
-        painter->drawPixmap(backgroundRect, IconUtils::renderIconBackground(backgroundRect.size()));
-
-        // 绘制缩略图(上下左右各缩小2px)
-        imageRect.adjust(4, 4, -4, -4);
-        QPainterPath clipPath;
-        clipPath.addRoundedRect(imageRect, 4, 4);
-        painter->setClipPath(clipPath);
-        painter->drawPixmap(imageRect, px);
-        painter->restore();
-        return backgroundRect;
-    }
-
-    painter->drawPixmap(qRound(x), qRound(y), px);
-
-    // return rect before scale
-    return QRect(qRound(x), qRound(y), w, h);
-}
-
 QRectF CollectionItemDelegate::paintEmblems(QPainter *painter, const QRectF &rect, const FileInfoPointer &info)
 {
     // todo(zy) uing extend painter by registering.
@@ -815,6 +789,31 @@ QRectF CollectionItemDelegate::paintEmblems(QPainter *painter, const QRectF &rec
         });
     }
     return rect;
+}
+
+void CollectionItemDelegate::paintBackground(QPainter *painter, const QStyleOptionViewItem &option, const QRect &iconRect) const
+{
+    bool isDragMode = (static_cast<QPaintDevice *>(parent()->viewport()) != painter->device());
+    bool isSelected = !isDragMode && (option.state & QStyle::State_Selected) && option.showDecorationSelected;
+    if (!isSelected)
+        return;
+
+    QColor backgroundColor(33, 33, 33, qRound(255 * 0.25));
+    QColor borderColor(241, 241, 241, qRound(255 * 0.25));
+    QRect backgroundRect = iconRect.adjusted(-kIconBackgroundMargin, -kIconBackgroundMargin, kIconBackgroundMargin, kIconBackgroundMargin);
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+
+    QPainterPath path;
+    int radius = parent()->iconSize().width() / kIconModeBackRadiusCoefficient;
+    path.addRoundedRect(backgroundRect, radius, radius);
+    painter->fillPath(path, backgroundColor);
+
+    painter->setPen(borderColor);
+    painter->drawPath(path);
+
+    painter->restore();
 }
 
 void CollectionItemDelegate::paintLabel(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index, const QRect &rLabel) const

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,7 +9,7 @@
 DPF_USE_NAMESPACE
 
 namespace ddplugin_background {
-DFM_LOG_REISGER_CATEGORY(DDP_BACKGROUND_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DDP_BACKGROUND_NAMESPACE)
 
 void BackgroundPlugin::initialize()
 {

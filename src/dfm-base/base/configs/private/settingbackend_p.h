@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,6 +11,7 @@
 #include <QMap>
 #include <QVariant>
 #include <QSet>
+#include <QTimer>
 
 DFMBASE_BEGIN_NAMESPACE
 
@@ -84,7 +85,8 @@ private:
 private:
     QMap<QString, GetOptFunc> getters;
     QMap<QString, SaveOptFunc> setters;
-    QSet<QString> serialDataKey;
+    QTimer* delayedSaveTimer { nullptr };
+    QVariantMap pendingSaveData;
 
     static BidirectionHash<QString, Application::ApplicationAttribute> keyToAA;
     static BidirectionHash<QString, Application::GenericAttribute> keyToGA;

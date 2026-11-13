@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -96,6 +96,7 @@ private:
     DLabel *subTitleOfFailedPage { nullptr };
     DLabel *subTitleOfSuccessPage { nullptr };
     DLabel *sendingStatusLabel { nullptr };
+    DLabel *failedErrorMsgLabel { nullptr };   // 失败页面的错误消息标签
     DProgressBar *progressBar { nullptr };
     DSpinner *spinner { nullptr };
 

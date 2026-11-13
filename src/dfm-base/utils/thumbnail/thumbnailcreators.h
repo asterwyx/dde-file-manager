@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,6 +20,10 @@ QImage audioThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::Thumb
 QImage imageThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
 QImage djvuThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
 QImage pdfThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
+QImage appimageThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
+QImage uabThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
+QImage pptxThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
+QImage krataThumbnailCreator(const QString &filePath, DFMGLOBAL_NAMESPACE::ThumbnailSize size);
 }   // namespace ThumbnailCreators
 }   // namespace dfmbase
 

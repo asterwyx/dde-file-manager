@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <dfm-framework/event/eventchannel.h>
+#include <dfm-framework/lifecycle/lifecycle.h>
 
 #include <QtConcurrent>
 
@@ -60,8 +61,20 @@ QVariant EventChannel::send()
 
 QVariant EventChannel::send(const QVariantList &params)
 {
-    if (!conn)
+    // Short-circuit during process shutdown: when plugins are being stopped,
+    // Q_GLOBAL_STATIC singletons (e.g. Settings) may already be destroyed in
+    // an unspecified order, and invoking cross-plugin handlers risks
+    // use-after-free. Push calls originated from plugin dtors / stop() paths
+    // are semantically meaningless at this point (no one consumes results).
+    if (Q_UNLIKELY(LifeCycle::isShuttingDown())) {
+        qCDebug(logDPF) << "EventChannel: dropping send during shutdown";
         return QVariant();
+    }
+
+    if (!conn) {
+        qCWarning(logDPF) << "EventChannel: no connection available for send operation";
+        return QVariant();
+    }
 
     return conn(params);
 }

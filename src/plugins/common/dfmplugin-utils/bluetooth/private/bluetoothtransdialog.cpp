@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,9 +27,14 @@
 #include <QDebug>
 #include <QTimer>
 #include <QPalette>
-#include <QtSvg/QSvgWidget>
 #include <QUuid>
 #include <QDateTime>
+
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+#    include <QSvgWidget>
+#else
+#    include <QSvgWidget>
+#endif
 
 #define TITLE_BT_TRANS_FILE dfmplugin_utils::BluetoothTransDialog::tr("Bluetooth File Transfer")
 #define TITLE_BT_TRANS_SUCC dfmplugin_utils::BluetoothTransDialog::tr("File Transfer Successful")
@@ -48,6 +53,7 @@
 #define TXT_FILE_ZEROSIZ dfmplugin_utils::BluetoothTransDialog::tr("Unable to send 0 KB files")
 #define TXT_FILE_NOEXIST dfmplugin_utils::BluetoothTransDialog::tr("File doesn't exist")
 #define TXT_DIR_SELECTED dfmplugin_utils::BluetoothTransDialog::tr("Transferring folders is not supported")
+#define TXT_LONG_FILENAME dfmplugin_utils::BluetoothTransDialog::tr("Error: The filename is too long")
 
 #define TXT_NEXT dfmplugin_utils::BluetoothTransDialog::tr("Next", "button")
 #define TXT_CANC dfmplugin_utils::BluetoothTransDialog::tr("Cancel", "button")
@@ -161,6 +167,8 @@ QString BluetoothTransDialog::humanizeObexErrMsg(const QString &msg)
                || msg.contains("Connection refused")
                || msg.contains("Connection reset by peer")) {
         return TXT_ERROR_REASON;
+    } else if (msg.contains("no such file or directory")) {
+        return TXT_FILE_NOEXIST;
     } else {   // ...TO BE CONTINUE
         fmWarning() << "bluetooth error message: " << msg;
         return "";
@@ -190,14 +198,14 @@ void BluetoothTransDialog::initUI()
 {
     setIcon(QIcon::fromTheme(kIconConnect));
     setFixedSize(381, 271);
-    layout()->setMargin(0);
+    layout()->setContentsMargins(0, 0, 0, 0);
     layout()->setSpacing(0);
 
     // main structure
     QFrame *mainFrame = new QFrame(this);
     QVBoxLayout *pLayout = new QVBoxLayout;
     pLayout->setSpacing(0);
-    pLayout->setMargin(0);
+    pLayout->setContentsMargins(0, 0, 0, 0);
     mainFrame->setLayout(pLayout);
 
     addContent(mainFrame);
@@ -211,7 +219,7 @@ void BluetoothTransDialog::initUI()
 
     // stacked area
     stackedWidget = new QStackedWidget(this);
-    stackedWidget->layout()->setMargin(0);
+    stackedWidget->layout()->setContentsMargins(0, 0, 0, 0);
     stackedWidget->layout()->setSpacing(0);
 
     pLayout->addWidget(stackedWidget);
@@ -315,6 +323,17 @@ void BluetoothTransDialog::initConn()
     connect(BluetoothManagerInstance, &BluetoothManager::transferCancledByRemote, this, [this](const QString &sessionPath) {
         if (sessionPath != currSessionPath)
             return;
+
+        if (BluetoothManagerInstance->isLongFilenameFailure(sessionPath)) {
+            if (failedErrorMsgLabel) {
+                failedErrorMsgLabel->setText(TXT_LONG_FILENAME);
+            }
+        } else {
+            if (failedErrorMsgLabel) {
+                failedErrorMsgLabel->setText(TXT_ERROR_REASON);
+            }
+        }
+
         stackedWidget->setCurrentIndex(kFailedPage);
         BluetoothManagerInstance->cancelTransfer(sessionPath);
     });
@@ -322,9 +341,10 @@ void BluetoothTransDialog::initConn()
     connect(BluetoothManagerInstance, &BluetoothManager::transferFailed, this, [this](const QString &sessionPath, const QString &filePath, const QString &errMsg) {
         if (sessionPath != currSessionPath)
             return;
+        failedErrorMsgLabel->setText(humanizeObexErrMsg(errMsg));
         stackedWidget->setCurrentIndex(kFailedPage);
         BluetoothManagerInstance->cancelTransfer(sessionPath);
-        fmDebug() << "filePath: " << filePath
+        fmWarning() << "filePath: " << filePath
                   << "\nerrorMsg: " << errMsg;
     });
 
@@ -360,7 +380,7 @@ QWidget *BluetoothTransDialog::createDeviceSelectorPage()
     QWidget *w = new QWidget(this);
     QVBoxLayout *pLayout = new QVBoxLayout(w);
     pLayout->setSpacing(0);
-    pLayout->setMargin(0);
+    pLayout->setContentsMargins(0, 0, 0, 0);
     w->setLayout(pLayout);
     // w->setStyleSheet("border: 1px solid red;");
 
@@ -371,6 +391,8 @@ QWidget *BluetoothTransDialog::createDeviceSelectorPage()
     pLayout->addWidget(statusTxt);
 
     devicesListView = new DListView(this);
+    devicesListView->setObjectName("DevicesListView");
+    devicesListView->setAccessibleName("DevicesListView");
     devModel = new QStandardItemModel(this);
     devicesListView->setFixedHeight(88);
     devicesListView->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
@@ -393,7 +415,7 @@ QWidget *BluetoothTransDialog::createDeviceSelectorPage()
     setObjTextStyle(linkBtn, 12, true);
     connect(linkBtn, &DCommandLinkButton::clicked, this, &BluetoothTransDialog::showBluetoothSetting);
     QHBoxLayout *pLay = new QHBoxLayout(this);
-    pLay->setMargin(0);
+    pLay->setContentsMargins(0, 0, 0, 0);
     pLay->setSpacing(0);
     pLay->addStretch(1);
     pLay->addWidget(linkBtn);
@@ -408,7 +430,7 @@ QWidget *BluetoothTransDialog::createNonDevicePage()
     QWidget *w = new QWidget(this);
     QVBoxLayout *pLay = new QVBoxLayout(w);
     pLay->setSpacing(0);
-    pLay->setMargin(0);
+    pLay->setContentsMargins(0, 0, 0, 0);
     w->setLayout(pLay);
 
     DLabel *statusTxt = new DLabel(TXT_NO_DEV_FOUND, this);
@@ -433,7 +455,7 @@ QWidget *BluetoothTransDialog::createNonDevicePage()
     iconLay->addStretch(1);
     iconLay->addWidget(pIconWid);
     iconLay->addStretch(1);
-    iconLay->setMargin(0);
+    iconLay->setContentsMargins(0, 0, 0, 0);
     iconLay->setSpacing(0);
     pLay->addWidget(pIconWidContainer);
 
@@ -518,7 +540,7 @@ QWidget *BluetoothTransDialog::createFailedPage()
     QWidget *w = new QWidget(this);
     QVBoxLayout *pLay = new QVBoxLayout(w);
     pLay->setSpacing(0);
-    pLay->setMargin(0);
+    pLay->setContentsMargins(0, 0, 0, 0);
     // w->setStyleSheet("border: 1px solid red;");
     w->setLayout(pLay);
 
@@ -529,12 +551,12 @@ QWidget *BluetoothTransDialog::createFailedPage()
     changeLabelTheme(subTitleOfFailedPage);
     pLay->addWidget(subTitleOfFailedPage);
 
-    DLabel *txt2 = new DLabel(TXT_ERROR_REASON, this);
-    txt2->setMargin(0);
-    txt2->setAlignment(Qt::AlignCenter);
-    setObjTextStyle(txt2, 12, false);
-    changeLabelTheme(txt2);
-    pLay->addWidget(txt2);
+    failedErrorMsgLabel = new DLabel(TXT_ERROR_REASON, this);
+    failedErrorMsgLabel->setMargin(0);
+    failedErrorMsgLabel->setAlignment(Qt::AlignCenter);
+    setObjTextStyle(failedErrorMsgLabel, 12, false);
+    changeLabelTheme(failedErrorMsgLabel);
+    pLay->addWidget(failedErrorMsgLabel);
     pLay->addStretch(1);
 
     return w;
@@ -710,17 +732,17 @@ void BluetoothTransDialog::sendFiles()
 
         if (!info->exists()) {
             close();   // 与产品经理沟通后，为避免文件不存在时的retry可能引起的一系列问题，当用户点击retry的确认时，直接终止流程
-            DialogManagerInstance->showMessageDialog(DFMBASE_NAMESPACE::DialogManager::kMsgErr, TXT_FILE_NOEXIST, "", TXT_OKAY);
+            DialogManagerInstance->showMessageDialog(TXT_FILE_NOEXIST, "", TXT_OKAY);
             return;
         } else if (info->size() > kFileTransferSizeLimits) {
-            DialogManagerInstance->showMessageDialog(DFMBASE_NAMESPACE::DialogManager::kMsgInfo, TXT_FILE_OVERSIZ, "", TXT_OKAY);
+            DialogManagerInstance->showMessageDialog(TXT_FILE_OVERSIZ, "", TXT_OKAY);
             return;
         } else if (info->size() == 0) {
-            DialogManagerInstance->showMessageDialog(DFMBASE_NAMESPACE::DialogManager::kMsgInfo, TXT_FILE_ZEROSIZ, "", TXT_OKAY);
+            DialogManagerInstance->showMessageDialog(TXT_FILE_ZEROSIZ, "", TXT_OKAY);
             return;
         } else if (info->isAttributes(dfmbase::OptInfoType::kIsDir)) {
             close();   // 与产品经理沟通后，为避免文件不存在时的retry可能引起的一系列问题，当用户点击retry的确认时，直接终止流程
-            DialogManagerInstance->showMessageDialog(DFMBASE_NAMESPACE::DialogManager::kMsgErr, TXT_DIR_SELECTED, "", TXT_OKAY);
+            DialogManagerInstance->showMessageDialog(TXT_DIR_SELECTED, "", TXT_OKAY);
             return;
         }
     }

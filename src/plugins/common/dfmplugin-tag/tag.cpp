@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,7 +16,7 @@
 #include "events/tageventreceiver.h"
 #include "data/tagproxyhandle.h"
 
-#include "plugins/common/core/dfmplugin-menu/menu_eventinterface_helper.h"
+#include "plugins/common/dfmplugin-menu/menu_eventinterface_helper.h"
 
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/base/schemefactory.h>
@@ -24,24 +24,30 @@
 #include <dfm-base/base/application/settings.h>
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/widgets/filemanagerwindowsmanager.h>
+#include <dfm-base/utils/universalutils.h>
 
 #include <QRectF>
 #include <QDBusConnection>
 #include <QCoreApplication>
 
 using CustomViewExtensionView = std::function<QWidget *(const QUrl &url)>;
+using ViewExtensionCreateFunc = std::function<QWidget *(const QUrl &url)>;
+using ViewExtensionUpdateFunc = std::function<void(QWidget *widget, const QUrl &url)>;
+using ViewExtensionShouldShowFunc = std::function<bool(const QUrl &url)>;
 
 Q_DECLARE_METATYPE(QRectF *)
 Q_DECLARE_METATYPE(QList<QVariantMap> *)
 Q_DECLARE_METATYPE(QList<QUrl> *)
 Q_DECLARE_METATYPE(CustomViewExtensionView)
+Q_DECLARE_METATYPE(ViewExtensionUpdateFunc)
+Q_DECLARE_METATYPE(ViewExtensionShouldShowFunc)
 Q_DECLARE_METATYPE(QByteArray *)
 Q_DECLARE_METATYPE(Qt::DropAction *)
 Q_DECLARE_METATYPE(dfmbase::ElideTextLayout *)
 
 DFMBASE_USE_NAMESPACE
 namespace dfmplugin_tag {
-DFM_LOG_REISGER_CATEGORY(DPTAG_NAMESPACE)
+DFM_LOG_REGISTER_CATEGORY(DPTAG_NAMESPACE)
 
 void Tag::initialize()
 {
@@ -73,14 +79,15 @@ bool Tag::start()
 {
     emit FileTagCacheIns.initLoadTagInfos();
 
-    CustomViewExtensionView func { Tag::createTagWidgetForPropertyDialog };
-    CustomViewExtensionView func2 { Tag::createTagWidgetForDetailView };
-    dpfSlotChannel->push("dfmplugin_detailspace", "slot_ViewExtension_Register", func2, -1);
-    dpfSlotChannel->push("dfmplugin_propertydialog", "slot_ViewExtension_Register", func, "Tag", 0);
+    // Register property dialog plugin
+    registerPlugin("dfmplugin-propertydialog", [this]() {
+        regToPropertyDialog();
+    });
 
-    QStringList &&filtes { "kFileSizeField", "kFileChangeTimeField", "kFileInterviewTimeField" };
-    dpfSlotChannel->push("dfmplugin_detailspace", "slot_BasicFiledFilter_Add",
-                         TagManager::scheme(), filtes);
+    // Register detail space plugin
+    registerPlugin("dfmplugin-detailspace", [this]() {
+        regToDetailspace();
+    });
 
     return true;
 }
@@ -119,24 +126,52 @@ void Tag::onAllPluginsStarted()
 
 QWidget *Tag::createTagWidgetForPropertyDialog(const QUrl &url)
 {
-    if (!TagManager::instance()->canTagFile(url))
-        return nullptr;
+    fmDebug() << "Creating tag widget for property dialog, URL:" << url.toString();
 
-    TagWidget *tagWidget = new TagWidget(url);
+    // Pass the ORIGINAL url so scheme-based hooks (e.g. vault's hook_CanTaged
+    // on "dfmvault://") can take effect. Pre-transforming to a local file://
+    // url would strip the scheme and bypass those business-rule hooks.
+    if (!TagManager::instance()->canTagFile(url)) {
+        fmDebug() << "Cannot tag file:" << url.toString();
+        return nullptr;
+    }
+
+    QUrl realUrl;
+    UniversalUtils::urlTransformToLocal(url, &realUrl);
+    auto tagWidget = new TagWidget(realUrl);
     tagWidget->initialize();
     return tagWidget;
 }
 
 QWidget *Tag::createTagWidgetForDetailView(const QUrl &url)
 {
-    if (!TagManager::instance()->canTagFile(url))
-        return nullptr;
-
-    TagWidget *tagWidget = new TagWidget(url);
+    Q_UNUSED(url)
+    // Widget is created once and reused - don't initialize with URL here
+    // URL will be set via updateTagWidgetForDetailView
+    TagWidget *tagWidget = new TagWidget;
     tagWidget->setLayoutHorizontally(true);
     tagWidget->initialize();
     tagWidget->setFrameShape(QFrame::NoFrame);
     return tagWidget;
+}
+
+void Tag::updateTagWidgetForDetailView(QWidget *widget, const QUrl &url)
+{
+    auto *tagWidget = qobject_cast<TagWidget *>(widget);
+    if (!tagWidget)
+        return;
+
+    QUrl realUrl;
+    UniversalUtils::urlTransformToLocal(url, &realUrl);
+    tagWidget->setUrl(realUrl);
+}
+
+bool Tag::shouldShowTagWidget(const QUrl &url)
+{
+    // Pass the ORIGINAL url so scheme-based hooks (e.g. vault's hook_CanTaged
+    // on "dfmvault://") can take effect. canTagFile() handles the local
+    // transformation internally; pre-transforming here bypasses those hooks.
+    return TagManager::instance()->canTagFile(url);
 }
 
 void Tag::installToSideBar()
@@ -216,7 +251,9 @@ void Tag::bindEvents()
 {
     dpfSignalDispatcher->subscribe(GlobalEventType::kHideFilesResult, TagEventReceiver::instance(), &TagEventReceiver::handleHideFilesResult);
     dpfSignalDispatcher->subscribe(GlobalEventType::kCutFileResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileCutResult);
-    dpfSignalDispatcher->subscribe(GlobalEventType::kMoveToTrashResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileRemoveResult);
+    dpfSignalDispatcher->subscribe(GlobalEventType::kCopyResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileCopyResult);
+    dpfSignalDispatcher->subscribe(GlobalEventType::kMoveToTrashResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileTrashedResult);
+    dpfSignalDispatcher->subscribe(GlobalEventType::kCleanTrashResult, TagEventReceiver::instance(), &TagEventReceiver::handleTrashCleanedResult);
     dpfSignalDispatcher->subscribe(GlobalEventType::kDeleteFilesResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileRemoveResult);
     dpfSignalDispatcher->subscribe(GlobalEventType::kRenameFileResult, TagEventReceiver::instance(), &TagEventReceiver::handleFileRenameResult);
     dpfSignalDispatcher->subscribe(GlobalEventType::kRestoreFromTrashResult, TagEventReceiver::instance(), &TagEventReceiver::handleRestoreFromTrashResult);
@@ -234,4 +271,62 @@ void Tag::bindWindows()
     });
     connect(&FMWindowsIns, &FileManagerWindowsManager::windowOpened, this, &Tag::onWindowOpened, Qt::DirectConnection);
 }
+
+void Tag::regToPropertyDialog()
+{
+    fmDebug() << "Registering tag widget to property dialog";
+    CustomViewExtensionView create { Tag::createTagWidgetForPropertyDialog };
+    ViewExtensionUpdateFunc update { [](QWidget *widget, const QUrl &url) {
+        auto *tagWidget = qobject_cast<TagWidget *>(widget);
+        if (!tagWidget)
+            return;
+        QUrl realUrl;
+        UniversalUtils::urlTransformToLocal(url, &realUrl);
+        tagWidget->setUrl(realUrl);
+    } };
+    dpfSlotChannel->push("dfmplugin_propertydialog",
+                         "slot_ViewExtensionWithUpdate_Register",
+                         create,
+                         update,
+                         QString("Tag"),
+                         0);
+}
+
+void Tag::regToDetailspace()
+{
+    ViewExtensionCreateFunc create { Tag::createTagWidgetForDetailView };
+    ViewExtensionUpdateFunc update { Tag::updateTagWidgetForDetailView };
+    ViewExtensionShouldShowFunc shouldShow { Tag::shouldShowTagWidget };
+
+    dpfSlotChannel->push("dfmplugin_detailspace", "slot_ViewExtension_Register",
+                         QVariant::fromValue(create),
+                         QVariant::fromValue(update),
+                         QVariant::fromValue(shouldShow),
+                         -1);
+
+    QStringList &&filters { "kFileSizeField", "kFileChangeTimeField", "kFileInterviewTimeField" };
+    dpfSlotChannel->push("dfmplugin_detailspace", "slot_BasicFiledFilter_Add",
+                         TagManager::scheme(), filters);
+}
+
+void Tag::registerPlugin(const QString &pluginName, std::function<void()> callback)
+{
+    auto plugin = DPF_NAMESPACE::LifeCycle::pluginMetaObj(pluginName);
+    if (plugin && plugin->pluginState() == DPF_NAMESPACE::PluginMetaObject::kStarted) {
+        callback();
+        return;
+    }
+
+    connect(
+            DPF_NAMESPACE::Listener::instance(),
+            &DPF_NAMESPACE::Listener::pluginStarted,
+            this,
+            [callback, pluginName](const QString &iid, const QString &name) {
+                Q_UNUSED(iid)
+                if (name == pluginName)
+                    callback();
+            },
+            Qt::DirectConnection);
+}
+
 }   // namespace dfmplugin_tag

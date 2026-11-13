@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -21,7 +21,7 @@ public:
     bool build() override;
     QList<QWidget *> subWidgets() const override;
 protected slots:
-    void onChenged(bool);
+    void onChanged(bool);
 protected:
     QList<CheckBoxWidget *> categories;
     const QHash<ItemCategory, QString> categoryName;

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,12 +11,13 @@
 #include <DFileChooserEdit>
 #include <DLabel>
 #include <DFileDialog>
+#include <DSpinner>
 
 #include <QComboBox>
-
-#include <polkit-qt5-1/PolkitQt1/Authority>
+#include <QFutureWatcher>
 
 namespace dfmplugin_vault {
+
 class RetrievePasswordView : public QFrame
 {
     Q_OBJECT
@@ -47,6 +48,10 @@ public:
 
     QString ValidationResults();
 
+    // 老密码方案迁移模式（从pbkdf2迁移到LUKS）
+    void setOldPasswordSchemeMigrationMode(bool enabled);
+    bool isOldPasswordSchemeMigrationMode() const;
+
 signals:
     /*!
      * /brief signalJump 页面跳转
@@ -56,27 +61,19 @@ signals:
     void sigBtnEnabled(const int &index, const bool &state);
 
     void sigResults(QString message);
+    void sigCloseDialog();
 
 public slots:
-
-    /*!
-     * /brief onComboBoxIndex   选择密钥文件的方式
-     * /param index             0默认路径选择，1用户自己选择
-     */
-    void onComboBoxIndex(int index);
-
     /*!
      * /brief onBtnSelectFilePath   设置用户选择的密钥文件路径
      * /param path                  选择的密钥文件路径
      */
     void onBtnSelectFilePath(const QString &path);
 
+    void onTextChanged(const QString &path);
 private slots:
-    /*!
-     * /brief slotCheckAuthorizationFinished 异步授权时，此函数接收授权完成的结果
-     * /param result 授权结果 成功或失败
-     */
-    void slotCheckAuthorizationFinished(PolkitQt1::Authority::Result result);
+    void onKeyVerificationFinished();
+    void onUnlockFinished();
 
 private:
     /*!
@@ -87,14 +84,10 @@ private:
 protected:
     void showEvent(QShowEvent *event) override;
 
-    void closeEvent(QCloseEvent *event) override;
-
 private:
     //! 找回密码页面标题
     DTK_WIDGET_NAMESPACE::DLabel *currentPageTitle { nullptr };
-
-    //! 选择要验证的密钥路径
-    QComboBox *savePathTypeComboBox { nullptr };
+    DTK_WIDGET_NAMESPACE::DLabel *savePathTypeLabel { Q_NULLPTR };
 
     //! 用户自选密钥文件路径编辑框
     DTK_WIDGET_NAMESPACE::DFileChooserEdit *filePathEdit { nullptr };
@@ -114,7 +107,17 @@ private:
     QString validationResults;
 
     QGridLayout *funLayout { nullptr };
-    DTK_WIDGET_NAMESPACE::DFileDialog *fileDialog { nullptr };
+    QWidget *m_parent { Q_NULLPTR };
+    DTK_WIDGET_NAMESPACE::DSpinner *spinner { nullptr };
+
+    struct KeyVerificationResult {
+        bool isValid;
+        QString password;
+    };
+    QFutureWatcher<KeyVerificationResult> *keyVerificationWatcher { nullptr };
+    QFutureWatcher<bool> *unlockWatcher { nullptr };
+
+    bool isOldPasswordSchemeMigrationModeFlag { false };
 };
 }
 #endif   // VAULTRETRIEVEPASSWORD_H

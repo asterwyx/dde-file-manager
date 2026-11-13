@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -30,6 +30,7 @@ public Q_SLOTS:
     void onTagsNameChanged(const QVariantMap &oldAndNew);
     void onFilesTagged(const QVariantMap &fileAndTags);
     void onFilesUntagged(const QVariantMap &fileAndTags);
+    void onTrashFileTagsChanged();
 
 private:
     explicit FileTagCacheWorker(QObject *parent = nullptr);
@@ -50,6 +51,7 @@ public:
     //query
     QStringList getTagsByFiles(const QStringList &paths) const;
     TagColorMap getTagsColor(const QStringList &tags) const;
+    QHash<QString, QStringList> findChildren(const QString &parentPath) const;
 
 private:
     explicit FileTagCache(QObject *parent = nullptr);
@@ -63,6 +65,9 @@ private:
     void changeFilesTagName(const QString &oldName, const QString &newName);
     void taggeFiles(const QVariantMap &fileAndTags);
     void untaggeFiles(const QVariantMap &fileAndTags);
+
+    QStringList getTrashTags(const QString &path, qint64 inode) const;
+    void reloadTrashFileTagsCache();
 
 private:
     QScopedPointer<FileTagCachePrivate> d;
@@ -80,6 +85,9 @@ public:
     QStringList getTagsByFiles(const QStringList &paths);
     QStringList getTagsByFile(const QString &path);
     QMap<QString, QColor> getCacheTagsColor(const QStringList &tags);
+    QHash<QString, QStringList> findChildren(const QString &parentPath) const;
+
+    QStringList getTrashFileTags(const QString &path, qint64 inode);
 
 Q_SIGNALS:
     void initLoadTagInfos();

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QMutex>
 #include <QHash>
+#include <QVariantMap>
 #include <QtCore/qobjectdefs.h>
 
 #include <dfm-mount/base/dmount_global.h>
@@ -46,17 +47,21 @@ public:
 private Q_SLOTS:
     void queryUsageAsync();
     void updateStorage(const QString &id, quint64 total, quint64 avai);
+    void onPollingIntervalChanged();
 
 private:
-    void queryUsageOfItem(const QVariantMap &itemData, DFMMOUNT::DeviceType type);
-    DevStorage queryUsageOfBlock(const QVariantMap &itemData);
-    DevStorage queryUsageOfProtocol(const QVariantMap &itemData);
+    // NOTE: keep these static/stateless -- they are executed on pool threads
+    // and must never dereference a (possibly destroyed) DeviceWatcherPrivate.
+    static void queryUsageOfItem(const QVariantMap &itemData, DFMMOUNT::DeviceType type);
+    static DevStorage queryUsageOfBlock(const QVariantMap &itemData);
+    static DevStorage queryUsageOfProtocol(const QVariantMap &itemData);
 
 private:
     DeviceWatcher *q { nullptr };
 
     QTimer pollingTimer;
-    const int kPollingInterval = 10000;
+    int pollingInterval { 10000 };
+    static constexpr int kMinPollingInterval { 10000 };
 
     QHash<QString, QVariantMap> allBlockInfos;
     QHash<QString, QVariantMap> allProtocolInfos;

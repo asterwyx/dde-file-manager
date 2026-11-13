@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "usersharehelper.h"
+#include "anonymouspermissionmanager.h"
 #include "sharewatchermanager.h"
 
 #include <dfm-base/dfm_global_defines.h>
@@ -10,6 +11,8 @@
 #include <dfm-base/utils/dialogmanager.h>
 #include <dfm-base/utils/sysinfoutils.h>
 #include <dfm-base/utils/networkutils.h>
+#include <dfm-base/utils/fileutils.h>
+#include <dfm-base/utils/systemservicemanager.h>
 #include <dfm-base/widgets/filemanagerwindowsmanager.h>
 
 #include <dfm-framework/event/event.h>
@@ -17,7 +20,9 @@
 #include <QDBusInterface>
 #include <QDBusConnection>
 #include <QDBusPendingCall>
+#include <QDBusPendingCallWatcher>
 #include <QDBusReply>
+#include <QDBusUnixFileDescriptor>
 #include <QDebug>
 #include <QProcess>
 #include <QStandardPaths>
@@ -27,44 +32,27 @@
 #include <QtConcurrent>
 #include <QNetworkInterface>
 #include <QSettings>
+#include <QTemporaryFile>
 
+#include <limits>
 #include <pwd.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 DFMBASE_USE_NAMESPACE
 namespace dfmplugin_dirshare {
 
 namespace DaemonServiceIFace {
-static constexpr char kInterfaceService[] { "com.deepin.filemanager.daemon" };
-static constexpr char kInterfacePath[] { "/com/deepin/filemanager/daemon/UserShareManager" };
-static constexpr char kInterfaceInterface[] { "com.deepin.filemanager.daemon.UserShareManager" };
+static constexpr char kInterfaceService[] { "org.deepin.Filemanager.UserShareManager" };
+static constexpr char kInterfacePath[] { "/org/deepin/Filemanager/UserShareManager" };
+static constexpr char kInterfaceInterface[] { "org.deepin.Filemanager.UserShareManager" };
 
 static constexpr char kFuncIsPasswordSet[] { "IsUserSharePasswordSet" };
 static constexpr char kFuncSetPasswd[] { "SetUserSharePassword" };
 static constexpr char kFuncCloseShare[] { "CloseSmbShareByShareName" };
-static constexpr char kFuncEnableSmbServices[] { "EnableSmbServices" };
-}   // namespace DBusINterfaceInfo
+}   // namespace DaemonServiceIFace
 
-namespace ShareConfig {
-static constexpr char kShareConfigPath[] { "/var/lib/samba/usershares" };
-static constexpr char kShareName[] { "sharename" };
-static constexpr char kShareAcl[] { "usershare_acl" };
-static constexpr char kSharePath[] { "path" };
-static constexpr char kShareComment[] { "comment" };
-static constexpr char kGuestOk[] { "guest_ok" };
-}   // namespace ShareConfig
-
-namespace SambaServiceIFace {
-static constexpr char kService[] { "org.freedesktop.systemd1" };
-static constexpr char kPath[] { "/org/freedesktop/systemd1/unit/smbd_2eservice" };
-static constexpr char kInterface[] { "org.freedesktop.systemd1.Unit" };
-
-static constexpr char kPropertySubState[] { "SubState" };
-static constexpr char kExpectedSubState[] { "running" };
-
-static constexpr char kFuncStart[] { "Start" };
-static constexpr char kParamReplace[] { "replace" };
-}
+static constexpr int kCloseShareAsyncTimeoutMs = std::numeric_limits<int>::max();
 
 UserShareHelper *UserShareHelper::instance()
 {
@@ -96,7 +84,9 @@ bool UserShareHelper::share(const ShareInfo &info)
 
     if (isValidShare(info)) {
         const auto &&name = info.value(ShareInfoKeys::kName).toString();
-        if (name.startsWith("-") || name.endsWith(" ")) {
+        // 是否包含了非法字符：%<>*?|/\\+=;:,\"，且不能以 "-" 和空格开头，或者空格结尾
+        QRegularExpression regex(R"(^(?![ -])[^%<>*?|/\\+=;:,"]*$(?<! ))");
+        if (!regex.match(name).hasMatch()) {
             DialogManagerInstance->showErrorDialog(tr("The share name must not contain %1, and cannot start with a dash (-) or whitespace, or end with whitespace.").arg("%<>*?|/\\+=;:,\""), "");
             return false;
         }
@@ -141,18 +131,58 @@ bool UserShareHelper::share(const ShareInfo &info)
 
 void UserShareHelper::setSambaPasswd(const QString &userName, const QString &passwd)
 {
-    QDBusReply<bool> reply = userShareInter->call(DaemonServiceIFace::kFuncSetPasswd, userName, passwd);
-    bool result = reply.isValid() && reply.error().message().isEmpty();
-    fmInfo() << "Samba password set result :" << result << ",error msg:" << reply.error().message();
+    // Create anonymous pipe for secure credential transmission
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        fmInfo() << "Failed to create anonymous pipe for credentials";
+        Q_EMIT sambaPasswordSet(false);
+        return;
+    }
 
-    Q_EMIT sambaPasswordSet(result);
+    // Prepare credentials data using QDataStream for reliable serialization
+    QByteArray credentials;
+    QDataStream stream(&credentials, QIODevice::WriteOnly);
+    stream << userName << FileUtils::encryptString(passwd);
+
+    // Write credentials to pipe and close write end immediately
+    ssize_t written = write(pipefd[1], credentials.constData(), credentials.size());
+    close(pipefd[1]);   // Close write end immediately after writing
+
+    if (written != credentials.size()) {
+        fmInfo() << "Failed to write credentials to pipe, written:" << written << "expected:" << credentials.size();
+        close(pipefd[0]);
+        Q_EMIT sambaPasswordSet(false);
+        return;
+    }
+
+    // Create file descriptor for D-Bus transmission
+    QDBusUnixFileDescriptor fd(pipefd[0]);
+    if (!fd.isValid()) {
+        fmInfo() << "Failed to create valid file descriptor from pipe";
+        close(pipefd[0]);
+        Q_EMIT sambaPasswordSet(false);
+        return;
+    }
+
+    // Call D-Bus interface with pipe file descriptor
+    QDBusInterface *interface = getUserShareInterface();
+    QDBusReply<bool> reply = interface->call(DaemonServiceIFace::kFuncSetPasswd, QVariant::fromValue(fd));
+    bool success = reply.isValid() && reply.value();
+    fmInfo() << "Samba password set result:" << success
+             << ", error msg:" << (reply.isValid() ? "none" : reply.error().message());
+
+    // Close read end (D-Bus service will have its own copy)
+    close(pipefd[0]);
+
+    Q_EMIT sambaPasswordSet(success);
 }
 
-void UserShareHelper::removeShareByPath(const QString &path)
+bool UserShareHelper::removeShareByPath(const QString &path)
 {
     const QString &&shareName = shareNameByPath(path);
     if (!shareName.isEmpty())
-        removeShareByShareName(shareName);
+        return removeShareByShareName(shareName);
+    return false;
 }
 
 int UserShareHelper::readPort()
@@ -213,14 +243,8 @@ void UserShareHelper::handleSetPassword(const QString &newPassword)
 
 bool UserShareHelper::isSambaServiceRunning()
 {
-    QDBusInterface iface(SambaServiceIFace::kService, SambaServiceIFace::kPath, SambaServiceIFace::kInterface, QDBusConnection::systemBus());
-
-    if (iface.isValid()) {
-        const QVariant &variantStatus = iface.property(SambaServiceIFace::kPropertySubState);   // 获取属性 SubState，等同于 systemctl status smbd 结果 Active 值
-        if (variantStatus.isValid())
-            return SambaServiceIFace::kExpectedSubState == variantStatus.toString();
-    }
-    return false;
+    // 使用 SystemServiceManager 统一检查服务状态（遵循 DRY 原则）
+    return SystemServiceManager::instance().isServiceRunning("smbd.service");
 }
 
 void UserShareHelper::startSambaServiceAsync(StartSambaFinished onFinished)
@@ -237,34 +261,65 @@ void UserShareHelper::startSambaServiceAsync(StartSambaFinished onFinished)
 
 QString UserShareHelper::sharedIP() const
 {
-    QString selfIp;
-    QStringList validIpList;
-    foreach (QNetworkInterface netInterface, QNetworkInterface::allInterfaces()) {
-        if (!netInterface.isValid())
-            continue;
-        QNetworkInterface::InterfaceFlags flags = netInterface.flags();
-        if (!(flags.testFlag(QNetworkInterface::IsRunning) && !flags.testFlag(QNetworkInterface::IsLoopBack)))
-            continue;
-        QList<QNetworkAddressEntry> entryList = netInterface.addressEntries();
-        foreach (QNetworkAddressEntry entry, entryList) {
-            if (!entry.ip().toString().isEmpty() && entry.ip().toString() != "0.0.0.0" && entry.ip().toIPv4Address()) {
-                validIpList << entry.ip().toString();
-            }
+    QString ip = "127.0.0.1";
+    QDBusInterface networkIface("org.freedesktop.NetworkManager",
+                                "/org/freedesktop/NetworkManager",
+                                "org.freedesktop.NetworkManager",
+                                QDBusConnection::systemBus());
+
+    auto primaryConn = networkIface.property("PrimaryConnection").value<QDBusObjectPath>();
+    QDBusInterface actIface("org.freedesktop.NetworkManager",
+                            primaryConn.path(),
+                            "org.freedesktop.NetworkManager.Connection.Active",
+                            QDBusConnection::systemBus());
+
+    auto ipv4CfgPath = actIface.property("Ip4Config").value<QDBusObjectPath>();
+    if (ipv4CfgPath.path().isEmpty()) {
+        fmInfo() << "got invalid ipv4config in" << primaryConn.path();
+        return ip;
+    }
+
+    QDBusInterface ipConfigIface("org.freedesktop.NetworkManager",
+                                 ipv4CfgPath.path(),
+                                 "org.freedesktop.DBus.Properties",
+                                 QDBusConnection::systemBus());
+    QDBusReply<QVariant> reply = ipConfigIface.call("Get",
+                                                    "org.freedesktop.NetworkManager.IP4Config",
+                                                    "AddressData");
+    if (!reply.isValid()) {
+        fmWarning() << "Failed to get AddressData:" << reply.error();
+        return ip;
+    }
+
+    // 解析 aa{sv} 类型
+    const QDBusArgument arg = reply.value().value<QDBusArgument>();
+    if (arg.currentType() != QDBusArgument::ArrayType) {
+        return ip;
+    }
+
+    arg.beginArray();
+    while (!arg.atEnd()) {
+        // 开始处理内层数组元素
+        QVariantMap item;
+        arg >> item;
+        if (!item.value("address", "").toString().isEmpty()) {
+            ip = item.value("address").toString();
+            break;
         }
     }
-    // If multiple IPs are got, just take the first one.
-    // There is not a list control on the UI for the IP.
-    // TODO(zhuangshu):discuss this issue with product manager, or reference the code of dde-network-core plugin.
-    if (validIpList.count() > 0)
-        selfIp = validIpList.first();
+    arg.endArray();
 
-    return selfIp;
+    return ip;
 }
 
 int UserShareHelper::getSharePort() const
 {
     QSettings smbConf("/etc/samba/smb.conf", QSettings::IniFormat);
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
     auto ports = smbConf.value("global/smb ports").toString().split(" ", QString::SkipEmptyParts);
+#else
+    auto ports = smbConf.value("global/smb ports").toString().split(" ", Qt::SkipEmptyParts);
+#endif
     return ports.isEmpty() ? -1 : ports.first().toInt();
 }
 
@@ -277,10 +332,10 @@ bool UserShareHelper::canShare(FileInfoPointer info)
     if (!info || !info->isAttributes(OptInfoType::kIsDir) || !info->isAttributes(OptInfoType::kIsReadable))
         return false;
 
-    if (DevProxyMng->isFileOfProtocolMounts(info->pathOf(PathInfoType::kFilePath)))
+    if (DevProxyMng->isFileOfProtocolMounts(info->pathOf(PathInfoType::kCanonicalPath)))
         return false;
 
-    if (info->urlOf(UrlInfoType::kUrl).scheme() == Global::Scheme::kBurn || DevProxyMng->isFileFromOptical(info->pathOf(PathInfoType::kFilePath)))
+    if (info->urlOf(UrlInfoType::kUrl).scheme() == Global::Scheme::kBurn || DevProxyMng->isFileFromOptical(info->pathOf(PathInfoType::kCanonicalPath)))
         return false;
 
     return true;
@@ -293,7 +348,8 @@ bool UserShareHelper::needDisableShareWidget(FileInfoPointer info)
 
 bool UserShareHelper::isUserSharePasswordSet(const QString &username)
 {
-    QDBusReply<bool> reply = userShareInter->call(DaemonServiceIFace::kFuncIsPasswordSet, username);
+    QDBusInterface *interface = getUserShareInterface();
+    QDBusReply<bool> reply = interface->call(DaemonServiceIFace::kFuncIsPasswordSet, username);
     bool result = reply.isValid() ? reply.value() : false;
     fmDebug() << "isSharePasswordSet result: " << result << ", error: " << reply.error();
 
@@ -311,6 +367,9 @@ void UserShareHelper::readShareInfos(bool sendSignal)
     QDir d(ShareConfig::kShareConfigPath);
     QFileInfoList shareList = d.entryInfoList(QDir::Files | QDir::Hidden);
     for (const auto &fileInfo : shareList) {
+        if (fileInfo.groupId() != SysInfoUtils::getUserId())
+            continue;
+
         QString filePath = fileInfo.absoluteFilePath();
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -321,7 +380,7 @@ void UserShareHelper::readShareInfos(bool sendSignal)
         QMap<QString, QString> info;
         QTextStream stream(&file);
         while (!stream.atEnd()) {
-            QString line = stream.readLine().trimmed();
+            QString line = stream.readLine();
             if (!line.isEmpty() && line.contains("=")) {
                 int idx = line.indexOf("=");
                 QString key = line.mid(0, idx);
@@ -411,6 +470,7 @@ void UserShareHelper::initConnect()
     connect(watcherManager, &ShareWatcherManager::fileMoved, this, &UserShareHelper::onShareMoved);
     connect(watcherManager, &ShareWatcherManager::fileDeleted, this, &UserShareHelper::onShareFileDeleted);
     connect(watcherManager, &ShareWatcherManager::subfileCreated, this, &UserShareHelper::onShareChanged);
+    connect(watcherManager, &ShareWatcherManager::fileAttributeChanged, this, &UserShareHelper::emitShareChanged);
 }
 
 void UserShareHelper::initMonitorPath()
@@ -420,18 +480,42 @@ void UserShareHelper::initMonitorPath()
         watcherManager->add(info.value(ShareInfoKeys::kPath).toString());
 }
 
-void UserShareHelper::removeShareByShareName(const QString &name)
+bool UserShareHelper::removeShareByShareName(const QString &name, bool silent)
 {
-    QDBusReply<bool> reply = userShareInter->asyncCall(DaemonServiceIFace::kFuncCloseShare, name, true);
-    if (reply.isValid() && reply.value()) {
-        fmDebug() << "share closed: " << name;
-    } else {
-        fmWarning() << "share close failed: " << name << ", " << reply.error();
-        // TODO(xust) regular user cannot remove the sharing which shared by root user. and should raise an error dialog to notify user.
-    }
+    QDBusInterface *interface = getUserShareInterface();
+    const auto oldShareInfo = shareInfoByShareName(name);
+    const QString sharePath = oldShareInfo.value(ShareInfoKeys::kPath).toString();
+    const bool wasAnonymous = oldShareInfo.value(ShareInfoKeys::kAnonymous).toBool();
+    const int originalTimeout = interface->timeout();
+    if (originalTimeout != kCloseShareAsyncTimeoutMs)
+        interface->setTimeout(kCloseShareAsyncTimeoutMs);
 
-    runNetCmd(QStringList() << "usershare"
-                            << "delete" << name);
+    auto *watcher = new QDBusPendingCallWatcher(interface->asyncCall(DaemonServiceIFace::kFuncCloseShare, name, !silent), this);
+
+    if (originalTimeout != kCloseShareAsyncTimeoutMs)
+        interface->setTimeout(originalTimeout);
+
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, name, sharePath, wasAnonymous](QDBusPendingCallWatcher *) {
+        QDBusPendingReply<bool> reply = *watcher;
+        watcher->deleteLater();
+
+        if (reply.isValid() && reply.value()) {
+            fmDebug() << "share closed: " << name;
+            runNetCmd(QStringList() << "usershare"
+                                    << "delete" << name);
+
+            if (wasAnonymous && !sharePath.isEmpty()) {
+                AnonymousPermissionManager::instance()->restoreDirectoryPermissions(sharePath);
+                AnonymousPermissionManager::instance()->restoreHomeDirectoryIfNoAnonymousShares();
+            }
+            return;
+        }
+
+        fmWarning() << "share close failed: " << name << ", " << reply.error();
+        emitShareRemoveFailed(sharePath);
+    });
+
+    return true;
 }
 
 void UserShareHelper::removeShareWhenShareFolderDeleted(const QString &deletedPath)
@@ -440,7 +524,7 @@ void UserShareHelper::removeShareWhenShareFolderDeleted(const QString &deletedPa
     if (shareName.isEmpty())
         return;
 
-    removeShareByShareName(shareName);
+    removeShareByShareName(shareName, true);
 }
 
 ShareInfo UserShareHelper::getOldShareByNewShare(const ShareInfo &newShare)
@@ -497,20 +581,21 @@ void UserShareHelper::handleErrorWhenShareFailed(int code, const QString &err) c
 
     // 端口被禁用
     if (err.contains("net usershare add: cannot convert name") && err.contains("{Device Timeout}")) {
-        NetworkUtils::instance()->doAfterCheckNet("127.0.0.1", { "139", "445" },
-                                                  [](bool result) {
-                                                      if (result) {
-                                                          DialogManagerInstance->showErrorDialog(tr("Sharing failed"), "");
-                                                      } else {
-                                                          DialogManagerInstance->showErrorDialog(tr("Sharing failed"),
-                                                                                                 tr("SMB port is banned, please check the firewall strategy."));
-                                                      }
-                                                  },
-                                                  500);
+        NetworkUtils::instance()->doAfterCheckNet(
+                "127.0.0.1", { "139", "445" },
+                [](bool result) {
+                    if (result) {
+                        DialogManagerInstance->showErrorDialog(tr("Sharing failed"), "");
+                    } else {
+                        DialogManagerInstance->showErrorDialog(tr("Sharing failed"),
+                                                               tr("SMB port is banned, please check the firewall strategy."));
+                    }
+                },
+                500);
         return;
     }
 
-    //计算机名称过长会报错
+    // 计算机名称过长会报错
     if (err.contains("gethostname failed") && err.contains("net usershare add: cannot convert name")) {
         DialogManagerInstance->showErrorDialog(tr("Sharing failed"), tr("The computer name is too long"));
         return;
@@ -552,25 +637,21 @@ int UserShareHelper::validShareInfoCount() const
 
 QPair<bool, QString> UserShareHelper::startSmbService()
 {
-    QDBusInterface iface(SambaServiceIFace::kService, SambaServiceIFace::kPath, SambaServiceIFace::kInterface, QDBusConnection::systemBus());
-    QDBusPendingReply<QDBusObjectPath> reply = iface.asyncCall(SambaServiceIFace::kFuncStart, SambaServiceIFace::kParamReplace);
-    reply.waitForFinished();
-    if (reply.isValid()) {
-        const QString &errMsg = reply.error().message();
-        if (errMsg.isEmpty()) {
-            if (!setSmbdAutoStart())
-                fmWarning() << "auto start smbd failed.";
-            return { true, "" };
-        }
+    QString errMsg;
+    // 使用 SystemServiceManager 统一管理服务启动和启用
+    bool smbdOk = SystemServiceManager::instance().enableServiceNow("smbd.service");
+    if (!smbdOk) {
+        errMsg = "Failed to start and enable smbd.service";
         return { false, errMsg };
     }
-    return { false, "restart smbd failed" };
-}
 
-bool UserShareHelper::setSmbdAutoStart()
-{
-    QDBusReply<bool> reply = userShareInter->call(DaemonServiceIFace::kFuncEnableSmbServices);
-    return reply.value();
+    bool nmbdOk = SystemServiceManager::instance().enableServiceNow("nmbd.service");
+    if (!nmbdOk) {
+        errMsg = "Failed to start and enable nmbd.service";
+        return { false, errMsg };
+    }
+
+    return { true, "" };
 }
 
 bool UserShareHelper::isValidShare(const QVariantMap &info) const
@@ -598,15 +679,22 @@ void UserShareHelper::emitShareRemoved(const QString &path)
     dpfSignalDispatcher->publish(kEventSpace, "signal_Share_ShareRemoved", path);
 }
 
+void UserShareHelper::emitShareChanged(const QString &path)
+{
+    Q_EMIT shareChanged(path);
+    dpfSignalDispatcher->publish(kEventSpace, "signal_Share_ShareChanged", path);
+}
+
 void UserShareHelper::emitShareRemoveFailed(const QString &path)
 {
+    Q_EMIT shareRemoveFailed(path);
+    dpfSignalDispatcher->publish(kEventSpace, "signal_Share_RemoveShareFailed", path);
 }
 
 UserShareHelper::UserShareHelper(QObject *parent)
     : QObject(parent)
 {
-    userShareInter.reset(new QDBusInterface(DaemonServiceIFace::kInterfaceService, DaemonServiceIFace::kInterfacePath, DaemonServiceIFace::kInterfaceInterface, QDBusConnection::systemBus(), this));
-
+    // D-Bus interface will be lazily initialized on first use to avoid unnecessary service activation
     watcherManager = new ShareWatcherManager(this);
     watcherManager->add(ShareConfig::kShareConfigPath);
 
@@ -614,5 +702,23 @@ UserShareHelper::UserShareHelper(QObject *parent)
     readShareInfos();
 
     initMonitorPath();
+}
+
+QDBusInterface *UserShareHelper::getUserShareInterface()
+{
+    if (!userShareInter) {
+        fmInfo() << "Initializing UserShare D-Bus interface on first use";
+        userShareInter.reset(new QDBusInterface(
+                DaemonServiceIFace::kInterfaceService,
+                DaemonServiceIFace::kInterfacePath,
+                DaemonServiceIFace::kInterfaceInterface,
+                QDBusConnection::systemBus(),
+                this));
+
+        if (!userShareInter->isValid()) {
+            fmWarning() << "Failed to create UserShare D-Bus interface:" << userShareInter->lastError().message();
+        }
+    }
+    return userShareInter.data();
 }
 }

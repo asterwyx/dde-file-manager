@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,6 +41,7 @@ public:
     bool hasOfflineEntry(const QString &stdSmb);
     QStringList allSmbIDs(QStringList *aggregated = nullptr, QStringList *seperated = nullptr);
     QString getDisplayNameOf(const QUrl &entryUrl);
+    QString getFullSmbPath(const QString &stdSmb);
     QList<QSharedPointer<VirtualEntryData>> virtualEntries();
 
 protected:
@@ -49,6 +50,8 @@ protected:
 
 private:
     explicit VirtualEntryDbHandler(QObject *parent = nullptr);
+
+    void checkAndUpdateTable();
 
     DFMBASE_NAMESPACE::SqliteHandle *handler { nullptr };
 };

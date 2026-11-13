@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,15 +40,21 @@ public slots:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void initializeWidgets();
     void initializeParameters();
     void initializeLayout();
     void initializeConnect();
+    void setupEditHeight();
 
     void processTags();
     void updateCrumbsColor(const QMap<QString, QColor> &tagsColor);
+    void updateBackgroundColor();
 
     void onPressESC() noexcept;
 

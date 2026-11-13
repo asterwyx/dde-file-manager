@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,6 +12,7 @@
 #include <dfm-base/base/configs/settingbackend.h>
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 #include <dfm-base/utils/dialogmanager.h>
+#include <dfm-base/utils/systemservicemanager.h>
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/dfm_global_defines.h>
 
@@ -20,11 +21,33 @@
 #include <QUrl>
 #include <QDBusInterface>
 #include <QDBusPendingCall>
+#include <QMutexLocker>
+#include <QtConcurrent>
 
 Q_DECLARE_METATYPE(const char *)
+using namespace GlobalDConfDefines::ConfigPath;
 
 namespace dfmplugin_smbbrowser {
 namespace smb_browser_utils {
+
+namespace {
+static constexpr char kAvahiDaemonService[] { "avahi-daemon.service" };
+
+QString serviceUnitName(const QString &service)
+{
+    if (service == "smb")
+        return "smbd.service";
+    if (service == "nmb")
+        return "nmbd.service";
+    if (service == "smbd" || service == "nmbd")
+        return service + ".service";
+    if (service == "smbd.service" || service == "nmbd.service")
+        return service;
+    if (service == kAvahiDaemonService)
+        return kAvahiDaemonService;
+    return {};
+}
+}
 
 QString networkScheme()
 {
@@ -49,7 +72,10 @@ bool isSmbMounted(const QString &stdSmb)
 {
     using namespace protocol_display_utilities;
     const QStringList &mountedSmbs = getStandardSmbPaths(getMountedSmb());
-    QString currSmbPath = stdSmb.toLower();
+    // getStandardSmbPath 返回的路径经过 QUrl::fromPercentEncoding 解码（如 %23 -> #），
+    // 而传入的 stdSmb 可能是 QUrl::toString() 的百分号编码形式。
+    // 为确保编码一致，需对 stdSmb 也进行解码后再比较。
+    QString currSmbPath = QUrl::fromPercentEncoding(stdSmb.toLocal8Bit()).toLower();
     if (!currSmbPath.endsWith("/"))
         currSmbPath.append("/");
     return mountedSmbs.contains(currSmbPath);
@@ -58,7 +84,7 @@ bool isSmbMounted(const QString &stdSmb)
 QString getDeviceIdByStdSmb(const QString &stdSmb)
 {
     using namespace protocol_display_utilities;
-    QString smb = stdSmb.toLower();
+    QString smb = QUrl::fromPercentEncoding(stdSmb.toLocal8Bit()).toLower();
     if (!smb.endsWith("/"))
         smb.append("/");
 
@@ -69,7 +95,7 @@ QString getDeviceIdByStdSmb(const QString &stdSmb)
             return id;
     }
 
-    fmDebug() << "cannot find matched device id of" << stdSmb;
+    fmWarning() << "No matching device ID found for SMB path:" << stdSmb << "using path as fallback";
     return stdSmb;
 }
 
@@ -80,63 +106,84 @@ QString getDeviceIdByStdSmb(const QString &stdSmb)
  */
 bool isServiceRuning(const QString &service)
 {
-    if (service.isEmpty() || (service != "smb" && service != "nmb"))
+    const QString &serviceName = serviceUnitName(service);
+    if (serviceName.isEmpty()) {
+        fmWarning() << "Invalid service name for status check:" << service;
         return false;
-
-    QDBusInterface iface("org.freedesktop.systemd1",
-                         QString("/org/freedesktop/systemd1/unit/%1d_2eservice").arg(service),
-                         "org.freedesktop.systemd1.Unit",
-                         QDBusConnection::systemBus());
-
-    if (iface.isValid()) {
-        const QVariant &variantStatus = iface.property("SubState");   // 获取属性 SubState，等同于 systemctl status smbd 结果 Active 值
-        if (variantStatus.isValid())
-            return "running" == variantStatus.toString();
     }
-    return false;
+
+    return dfmbase::SystemServiceManager::instance().isServiceRunning(serviceName);
 }
 
-/*!
- * \brief startService
- * \param service: options { "smb" | "nmb" }
- * \return
- */
-bool startService(const QString &service)
+bool enableServiceNow(const QString &service)
 {
-    if (service.isEmpty() || (service != "smb" && service != "nmb"))
+    const QString &serviceName = serviceUnitName(service);
+    if (serviceName.isEmpty()) {
+        fmWarning() << "Invalid service name for enable operation:" << service;
         return false;
+    }
 
-    fmDebug() << QString("activate smbd: construct %1d interface").arg(service);
-    QDBusInterface iface("org.freedesktop.systemd1",
-                         QString("/org/freedesktop/systemd1/unit/%1d_2eservice").arg(service),
-                         "org.freedesktop.systemd1.Unit",
-                         QDBusConnection::systemBus());
-    fmDebug() << QString("activate smbd: constructed %1d interface").arg(service);
-
-    QDBusPendingCall call = iface.asyncCall("Start", "replace");
-    call.waitForFinished();
-    fmDebug() << QString("activate smbd: calling the %1d::Start method: ").arg(service) << call.isValid();
-    return call.isValid();
-}
-
-void enableServiceAsync()
-{
-    QDBusInterface iface("com.deepin.filemanager.daemon",
-                         "/com/deepin/filemanager/daemon/UserShareManager",
-                         "com.deepin.filemanager.daemon.UserShareManager",
-                         QDBusConnection::systemBus());
-    iface.asyncCall("EnableSmbServices");
+    fmDebug() << "Enable service:" << serviceName;
+    bool result = dfmbase::SystemServiceManager::instance().enableServiceNow(serviceName);
+    fmDebug() << "Service enable result for" << serviceName << ":" << result;
+    return result;
 }
 
 bool checkAndEnableService(const QString &service)
 {
-    if (isServiceRuning(service))
-        return true;
-    if (startService(service)) {
-        enableServiceAsync();
+    const QString &serviceName = serviceUnitName(service);
+    if (serviceName.isEmpty()) {
+        fmWarning() << "Invalid service name for check operation:" << service;
+        return false;
+    }
+
+    if (!dfmbase::SystemServiceManager::instance().serviceExists(serviceName)) {
+        fmWarning() << "Service unit does not exist:" << serviceName;
+        return false;
+    }
+
+    if (isServiceRuning(service)) {
+        fmDebug() << "Service already running:" << serviceName;
         return true;
     }
+
+    fmDebug() << "Service not running, attempting to start:" << serviceName;
+    if (enableServiceNow(service)) {
+        fmDebug() << "Successfully started and enabled service:" << serviceName;
+        return true;
+    }
+
+    fmCritical() << "Failed to start service:" << serviceName;
     return false;
+}
+
+bool ensureNetworkDiscoveryService(bool *serviceStarted)
+{
+    if (serviceStarted)
+        *serviceStarted = false;
+
+    static QMutex mutex;
+    QMutexLocker locker(&mutex);
+
+    const QString serviceName { kAvahiDaemonService };
+    if (!dfmbase::SystemServiceManager::instance().serviceExists(serviceName)) {
+        fmWarning() << "Network discovery service unit does not exist:" << serviceName;
+        return false;
+    }
+
+    if (isServiceRuning(serviceName)) {
+        fmDebug() << "Network discovery service already running:" << serviceName;
+        return true;
+    }
+
+    if (!enableServiceNow(serviceName)) {
+        fmCritical() << "Failed to start network discovery service:" << serviceName;
+        return false;
+    }
+
+    if (serviceStarted)
+        *serviceStarted = true;
+    return true;
 }
 
 void bindSetting()

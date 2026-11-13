@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,12 +8,12 @@
 #include "dfmplugin_optical_global.h"
 
 #include <dfm-base/widgets/filemanagerwindow.h>
-#include <dfm-base/utils/filestatisticsjob.h>
+#include <dfm-base/utils/filescanner.h>
 
 #include <QWidget>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QSvgWidget>
+#include <QtSvgWidgets/QSvgWidget>
 #include <DPushButton>
 
 namespace dfmplugin_optical {
@@ -61,7 +61,7 @@ private:
     int curMediaType;
     QString curMediaTypeStr;
 
-    DFMBASE_NAMESPACE::FileStatisticsJob *statisticWorker { nullptr };
+    DFMBASE_NAMESPACE::FileScanner *statisticWorker { nullptr };
 };
 
 }

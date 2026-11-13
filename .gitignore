@@ -4,7 +4,6 @@
 *.o
 *.obj
 .qmake.stash
-*.cmake
 CMakeLists.txt.user*
 CMakeFiles
 CMakeCache.txt
@@ -24,7 +23,6 @@ mocs_*
 # Executables
 *.exe
 *.out
-*.app
 Makefile
 Makefile.*
 *.Debug
@@ -34,46 +32,21 @@ Makefile.*
 
 debug
 release
-build*
+build
+build-autotests/
 
 *.pro.user
 *.pro.user*
 *.qm
 *.autosave
 
-vendor/include/*
-vendor/lib/*
-
-dde-sharefiles/lib/*
-dde-sharefiles/tmp/*
-dde-sharefiles/log/*
-
-NUL
-
-# Documents
-doc/html/*
-
-dde-file-manager-lib/test_shutil/fileutils/fileutil_t1.txt
-
-dde-file-manager-lib/test_shutil/fileutils/fileutil_t2.txt
-
-dde-file-manager-lib/test_shutil/fileutils/jsonArry.json
-
-dde-file-manager-lib/test_shutil/fileutils/jsonObj.json
-
-dde-file-manager-lib/test_shutil/fileutils/sub/fileutil_file_new1.txt
-
-dde-file-manager-lib/test_shutil/new1.txt
-
-dde-file-manager-lib/test_shutil/new2.txt
-
-dde-file-manager-lib/test_shutil/property/oneProperty.pro
-
 # vscode
 .vscode
 
-# debhelper-build-stamp
+# deepin-IDE
+.unioncode
 
+# debhelper-build-stamp
 .debhelper
 *.deb
 *.dsc
@@ -83,3 +56,32 @@ dde-file-manager-lib/test_shutil/property/oneProperty.pro
 *.tar.gz
 *.log
 *.substvars
+
+# clangd cache files
+.cache
+
+# AI config
+.cursorindexingignore
+.cursor
+.specstory
+.spec-workflow/
+.serena/
+.kiro/
+.promptx/
+.qoder/
+.qoderignore
+CLAUDE.md
+AGENTS.md
+.trellis
+.claude
+.agents
+.worktrees
+.codex
+.opencode
+.codegraph
+.pms
+
+# autotests
+Testing
+__pycache__
+*.pyc

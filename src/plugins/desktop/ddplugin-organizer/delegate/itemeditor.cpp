@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -47,7 +47,7 @@ void ItemEditor::setBaseGeometry(const QRect &base, const QSize &itemSize, const
     setMinimumHeight(base.height());
 
     auto lay = new QVBoxLayout(this);
-    lay->setMargin(0);
+    lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
 
     // add grid margin ,icon height ,icon space, text padding
@@ -70,7 +70,7 @@ void ItemEditor::init()
 
     connect(textEditor, &RenameEdit::textChanged, this, &ItemEditor::textChanged, Qt::UniqueConnection);
     QVBoxLayout *lay = new QVBoxLayout(this);
-    lay->setMargin(0);
+    lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->addWidget(textEditor, Qt::AlignTop | Qt::AlignHCenter);
@@ -139,6 +139,7 @@ void ItemEditor::showAlertMessage(const QString &text, int duration)
 DArrowRectangle *ItemEditor::createTooltip()
 {
     auto tooltip = new DArrowRectangle(DArrowRectangle::ArrowTop);
+    tooltip->setAccessibleName("Tooltip");
     tooltip->setObjectName("AlertTooltip");
 
     QLabel *label = new QLabel(tooltip);
@@ -202,6 +203,8 @@ void ItemEditor::setOpacity(qreal opacity)
 RenameEdit *ItemEditor::createEditor()
 {
     auto edit = new RenameEdit();
+    edit->setObjectName("RenameEdit_2");
+    edit->setAccessibleName("RenameEdit_2");
     edit->setWordWrapMode(QTextOption::WrapAnywhere);
     edit->setAlignment(Qt::AlignHCenter);
     edit->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);

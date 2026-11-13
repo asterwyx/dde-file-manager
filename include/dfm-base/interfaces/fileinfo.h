@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -43,7 +43,7 @@ public:
         kSuffix = 3,   // 文件的suffix: gz
         kCompleteSuffix = 4,   // 文件完整suffix: tar.gz
         kFileNameOfRename = 5,   // 没有特殊情况返回: archive.tar.gz
-        kBaseNameOfRename = 6,   // 没有特殊情况返回: archive
+        kBaseNameOfRename = 6,   // 没有特殊情况返回: archive.tar
         kSuffixOfRename = 7,   // 没有特殊情况返回: tar.gz
         kFileCopyName = 8,   // 文件的拷贝名称
         kIconName = 9,   // 文件的icom名称
@@ -113,8 +113,14 @@ public:
         kFileIsHid = 6,   // 是否是隐藏文件
         kFileLocalDevice = 7,   // 文件是本地文件
         kFileCdRomDevice = 8,   // 文件是光驱
-        kFileThumbnail = 9,     // 文件缩略图
+        kFileThumbnail = 9,   // 文件缩略图
         kCustomerStartExtended = 50,   // 其他用户使用
+        kFileNeedUpdate = 51,   // 文件信息需要在显示更新
+        kFileNeedTransInfo = 52,   // 文件信息需要转换为desktopfileinfo
+        kFileHighlightContent = 53,   // 文件需要高亮内容
+        kExpectedSize = 54,   // 文件预期大小（用于正在拷贝/移动的文件）
+        kFileCanTag = 55,   // 文件是否可以tag
+        kFileEmblems = 57,  // 文件的角标
         kUnknowExtendedInfo = 255,
     };
     /*!
@@ -178,7 +184,6 @@ public:
         kIsRoot = 7,   // 是否是根文件
         kIsBundle = 8,   // 是否是二进制文件
         kIsDragCompressFileFormat = 9,   // 是否可以追加压缩
-        kIsPrivate = 10,   // 是否是私有文件
         kCustomerFileIs = 50,   // 其他用户使用
         kUnknowFileIsInfo = 255,
     };
@@ -191,7 +196,7 @@ public:
         kCanTrash = 1,   // 可以移动到回收站
         kCanRename = 2,   // 可以重命名
         kCanRedirectionFileUrl = 3,   // 可以重定向
-        kCanMoveOrCopy = 4,   // 可以移动或者拷贝
+        kCanMoveOrCopy = 4,   // 可以拷贝(若需要可以移动使用,则使用kCanRename去判断)
         kCanDrop = 5,   // 可以Drop
         kCanDrag = 6,   // 可以drag
         kCanDragCompress = 7,   // 可以压缩
@@ -247,8 +252,8 @@ public:
         kStandardFileExists = 20,   // bool
         kStandardIsLocalDevice = 21,   // bool
         kStandardIsCdRomDevice = 22,   // bool
-        kStandardFileType = 22,   // FileInfo::FileType
-        kOriginalUri = 23, // original uri
+        kStandardFileType = 23,   // FileInfo::FileType
+        kOriginalUri = 24,   // original uri
 
         kEtagValue = 40,   // string
 

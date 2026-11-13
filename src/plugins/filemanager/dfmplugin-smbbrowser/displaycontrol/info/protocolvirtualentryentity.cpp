@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "protocolvirtualentryentity.h"
 #include "displaycontrol/datahelper/virtualentrydbhandler.h"
+#include <dfm-base/base/device/devicealiasmanager.h>
 
 DPSMBBROWSER_USE_NAMESPACE
 DFMBASE_USE_NAMESPACE
@@ -16,10 +17,22 @@ ProtocolVirtualEntryEntity::ProtocolVirtualEntryEntity(const QUrl &url)
 QString dfmplugin_smbbrowser::ProtocolVirtualEntryEntity::displayName() const
 {
     static constexpr char kVEntryDisplayName[] { "ventry_display_name" };
-    if (!datas.value(kVEntryDisplayName).toString().isEmpty())
-        return datas.value(kVEntryDisplayName).toString();
-    datas.insert(kVEntryDisplayName, VirtualEntryDbHandler::instance()->getDisplayNameOf(entryUrl));
-    return datas.value(kVEntryDisplayName).toString();
+    if (datas.value(kVEntryDisplayName).toString().isEmpty()) {
+        datas.insert(kVEntryDisplayName, VirtualEntryDbHandler::instance()->getDisplayNameOf(entryUrl));
+    }
+
+    auto &&displayName =  datas.value(kVEntryDisplayName).toString();
+    const auto &alias = NPDeviceAliasManager::instance()->getAlias(targetUrl());
+    if (!alias.isEmpty())
+        displayName.replace(targetUrl().host(), alias);
+
+    return displayName;
+}
+
+QString dfmplugin_smbbrowser::ProtocolVirtualEntryEntity::editDisplayText() const
+{
+    const auto &alias = NPDeviceAliasManager::instance()->getAlias(targetUrl());
+    return alias.isEmpty() ? targetUrl().host() : alias;
 }
 
 QIcon dfmplugin_smbbrowser::ProtocolVirtualEntryEntity::icon() const
@@ -56,5 +69,13 @@ QUrl ProtocolVirtualEntryEntity::targetUrl() const
 {
     QString path = entryUrl.path();
     path.remove("." + QString(kVEntrySuffix));
-    return QUrl(path);
+    auto ret = QUrl(path);
+    if (ret.path() == "/" || ret.path().isEmpty())
+        return ret;
+    return VirtualEntryDbHandler::instance()->getFullSmbPath(path);
+}
+
+bool ProtocolVirtualEntryEntity::renamable() const
+{
+    return NPDeviceAliasManager::instance()->canSetAlias(targetUrl());
 }

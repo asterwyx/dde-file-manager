@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -71,6 +71,8 @@ bool ShareEventHelper::hookSendChangeCurrentUrl(quint64 winId, const QUrl &url)
         auto u(url);
         u.setScheme(DFMBASE_NAMESPACE::Global::Scheme::kFile);
         QList<QUrl> urls { u };
+
+        fmDebug() << "Hooking change current URL operation - redirecting from" << url << "to file scheme:" << u;
         ShareEventsCaller::sendOpenDirs(winId, urls, ShareEventsCaller::kOpenInCurrentWindow);
         return true;
     }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -15,7 +15,6 @@
 
 #include <QObject>
 #include <QFileDevice>
-
 
 namespace dfmplugin_vault {
 class VaultFileHelper : public QObject
@@ -57,7 +56,6 @@ public:
     bool renameFilesAddText(const quint64 windowId, const QList<QUrl> urls, const QPair<QString, DFMBASE_NAMESPACE::AbstractJobHandler::FileNameAddFlag> replacePair);
     bool checkDragDropAction(const QList<QUrl> &urls, const QUrl &urlTo, Qt::DropAction *action);
     bool handleDropFiles(const QList<QUrl> &fromUrls, const QUrl &toUrl);
-    bool openFileByApp(const quint64 windowId, const QList<QUrl> urls, const QList<QString> apps);
     bool setPermision(const quint64 windowId,
                       const QUrl url,
                       const QFileDevice::Permissions permissions,

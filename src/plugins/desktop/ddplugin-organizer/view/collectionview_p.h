@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,10 +26,12 @@ class GraphicsEffect : public QGraphicsEffect
     Q_OBJECT
 public:
     explicit GraphicsEffect(CollectionView *parent);
+
 protected:
     void draw(QPainter *painter) override;
     void sourceChanged(ChangeFlags flags) override;
     QRectF boundingRectFor(const QRectF &sourceRect) const override;
+
 private:
     CollectionView *view;
 };
@@ -38,6 +40,11 @@ class CollectionViewPrivate : public QObject
 {
     Q_OBJECT
 public:
+    enum class ClickedAction : uint8_t {
+        kClicked = 0,
+        kDoubleClicked
+    };
+
     explicit CollectionViewPrivate(const QString &uuid, CollectionDataProvider *dataProvider, CollectionView *qq, QObject *parent = nullptr);
     ~CollectionViewPrivate();
 
@@ -79,6 +86,7 @@ public:
     void clearClipBoard();
     void selectCollection();
     void copyFiles();
+    void copyFilePath();
     void cutFiles();
     void pasteFiles();
     void undoFiles();
@@ -88,8 +96,10 @@ public:
     QModelIndex findIndex(const QString &key, bool matchStart, const QModelIndex &current, bool reverseOrder, bool excludeCurrent) const;
 
     void updateDFMMimeData(QDropEvent *event);
-    bool checkTargetEnable(const QUrl &targetUrl);
     void redoFiles();
+    bool checkTargetEnable(QDropEvent *event, const QUrl &targetUrl);
+    void openIndexByClicked(const ClickedAction action, const QModelIndex &index);
+    void openIndex(const QModelIndex &index);
 
 private:
     void updateRowCount(const int &viewHeight, const int &itemHeight);
@@ -146,12 +156,17 @@ public:
     QPoint pressedPosition;
     QRect elasticBand;
     bool pressedAlreadySelected = false;
+    bool ignoreMouseEvent = false;
 
     Qt::SortOrder sortOrder = Qt::DescendingOrder;
     int sortRole = DFMGLOBAL_NAMESPACE::ItemRoles::kItemFileMimeTypeRole;
 
     QString searchKeys;
     QTimer *searchTimer = nullptr;
+
+    bool flicker = false;
+    bool freeze { false };
+    bool imEnabled { true };   // 是否在桌面画布激活输入法（触屏大屏机型关闭以避免误弹软键盘）
 
     DFMBASE_NAMESPACE::DFMMimeData dfmmimeData;
 };

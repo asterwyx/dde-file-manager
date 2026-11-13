@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -23,6 +23,7 @@ public:
 
     bool renamable() const;
     QString displayName() const;
+    QString editDisplayText() const;
     quint64 sizeTotal() const;
     quint64 sizeUsage() const;
     quint64 sizeFree() const;

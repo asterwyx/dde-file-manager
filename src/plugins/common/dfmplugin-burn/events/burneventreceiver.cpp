@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,7 +42,7 @@ BurnEventReceiver *BurnEventReceiver::instance()
 void BurnEventReceiver::handleShowBurnDlg(const QString &dev, bool isSupportedUDF, QWidget *parent)
 {
     QString devId { DeviceUtils::getBlockDeviceId(dev) };
-    auto &&map = DevProxyMng->queryBlockInfo(devId);
+    const auto &map = DevProxyMng->queryBlockInfo(devId, true);
 
     QString defaultDiscName { qvariant_cast<QString>(map[DeviceProperty::kIdLabel]) };
     QStringList speed { qvariant_cast<QStringList>(map[DeviceProperty::kOpticalWriteSpeed]) };
@@ -86,16 +86,14 @@ void BurnEventReceiver::handlePasteTo(const QList<QUrl> &urls, const QUrl &dest,
         bool isBlank { DeviceUtils::isBlankOpticalDisc(devId) };
 
         auto fi { InfoFactory::create<FileInfo>(urls.front()) };
-        static const QSet<QString> imageTypes { Global::Mime::kTypeCdImage, Global::Mime::kTypeISO9660Image };
 
-        if (isBlank && fi && imageTypes.contains(fi->nameOf(NameInfoType::kMimeTypeName)) && destDir.count() == 0) {
+        if (isBlank && fi && BurnHelper::isMountableImage(fi->nameOf(NameInfoType::kMimeTypeName)) && destDir.count() == 0) {
             int r { BurnHelper::showOpticalImageOpSelectionDialog() };
             if (r == 1) {
                 qint64 srcSize { fi->size() };
                 qint64 avil { qvariant_cast<qint64>(map[DeviceProperty::kSizeFree]) };
                 if (avil == 0 || srcSize > avil) {
-                    DialogManagerInstance->showMessageDialog(DialogManager::kMsgWarn,
-                                                             tr("Unable to burn. Not enough free space on the target disk."));
+                    DialogManagerInstance->showMessageDialog(tr("Unable to burn. Not enough free space on the target disk."));
                 } else {
                     QScopedPointer<BurnOptDialog> dlg { new BurnOptDialog(dev, qApp->activeWindow()) };
                     dlg->setISOImage(urls.front());

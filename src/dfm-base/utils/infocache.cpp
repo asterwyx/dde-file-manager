@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,6 +11,8 @@
 
 // cache file total count
 static constexpr int kCacheFileinfoCount = 20000;
+// cache file watcher total count
+static constexpr int kCacheFileWatcherCount = 5000;
 // rotation training time
 static constexpr int kRotationTrainingTime = (60 * 1000);
 // remove cache time limit
@@ -34,8 +36,9 @@ InfoCache::InfoCache(QObject *parent)
 
 InfoCache &InfoCache::instance()
 {
-    static InfoCache cache;
-    return cache;
+    // 多个模块中使用static,析构的顺序无法预测，可能造成段错误
+    static InfoCache *cache = new InfoCache;
+    return *cache;
 }
 
 InfoCache::~InfoCache()
@@ -95,7 +98,7 @@ void InfoCache::removeCache(const QUrl url)
  */
 bool InfoCache::cacheDisable(const QString &scheme)
 {
-    return d->disableCahceSchemes.contains(scheme);
+    return d->disableCahceSchemes.containsByLock(scheme);
 }
 /*!
  * \brief setCacheDisbale 设置scheme是否可以缓存
@@ -108,11 +111,11 @@ bool InfoCache::cacheDisable(const QString &scheme)
  */
 void InfoCache::setCacheDisbale(const QString &scheme, bool disable)
 {
-    if (!d->disableCahceSchemes.contains(scheme) && disable) {
+    if (!d->disableCahceSchemes.containsByLock(scheme) && disable) {
         d->disableCahceSchemes.push_backByLock(scheme);
         return;
     }
-    if (d->disableCahceSchemes.contains(scheme) && !disable) {
+    if (d->disableCahceSchemes.containsByLock(scheme) && !disable) {
         d->disableCahceSchemes.removeOneByLock(scheme);
         return;
     }
@@ -133,7 +136,7 @@ void InfoCache::cacheInfo(const QUrl url, const FileInfoPointer info)
         return;
 
     {
-        QReadLocker rlk(&d->mianLock);
+        QReadLocker rlk(&d->mainLock);
         if (d->mainCache.contains(url))
             return;
     }
@@ -144,35 +147,34 @@ void InfoCache::cacheInfo(const QUrl url, const FileInfoPointer info)
             return;
     }
 
-    //获取监视器，监听当前的file的改变 当没有缓存加入监视器后，这里的watcher就会析构，如果启动了就要停止监控，这个是代理
-    // 代理就将启动的缓存了监视关闭了。本来没有缓存的监视器监视就没有意义
-    if (!WatcherCache::instance().cacheDisable(url.scheme())) {
-        auto parentUrl = UrlRoute::urlParent(url);
-        auto parentPath = parentUrl.path();
-        if (parentPath != QDir::separator() && !parentPath.endsWith(QDir::separator()))
-            parentUrl.setPath(parentPath + QDir::separator());
+    // 获取监视器，监听当前的file的改变 当没有缓存加入监视器后，这里的watcher就会析构，如果启动了就要停止监控，这个是代理
+    //  代理就将启动的缓存了监视关闭了。本来没有缓存的监视器监视就没有意义
+    //  if (!WatcherCache::instance().cacheDisable(url.scheme())) {
+    //      auto parentUrl = UrlRoute::urlParent(url);
+    //      auto parentPath = parentUrl.path();
+    //      if (parentPath != QDir::separator() && !parentPath.endsWith(QDir::separator()))
+    //          parentUrl.setPath(parentPath + QDir::separator());
 
-        auto watcher = WatcherFactory::create<AbstractFileWatcher>(parentUrl);
-        if (watcher) {
-            if (watcher->getCacheInfoConnectSize() == 0) {
-                connect(watcher.data(), &AbstractFileWatcher::fileDeleted, this, &InfoCache::removeCache);
-                connect(watcher.data(), &AbstractFileWatcher::fileAttributeChanged, this,
-                        &InfoCache::refreshFileInfo);
-                connect(watcher.data(), &AbstractFileWatcher::fileRename, this,
-                        &InfoCache::removeCache);
-                connect(watcher.data(), &AbstractFileWatcher::subfileCreated, this,
-                        &InfoCache::refreshFileInfo);
-                watcher->startWatcher();
-            }
-            watcher->addCacheInfoConnectSize();
-        }
-    }
-
+    //     auto watcher = WatcherFactory::create<AbstractFileWatcher>(parentUrl);
+    //     if (watcher) {
+    //         if (watcher->getCacheInfoConnectSize() == 0) {
+    //             connect(watcher.data(), &AbstractFileWatcher::fileDeleted, this, &InfoCache::removeCache);
+    //             connect(watcher.data(), &AbstractFileWatcher::fileAttributeChanged, this,
+    //                     &InfoCache::refreshFileInfo);
+    //             connect(watcher.data(), &AbstractFileWatcher::fileRename, this,
+    //                     &InfoCache::removeCache);
+    //             connect(watcher.data(), &AbstractFileWatcher::subfileCreated, this,
+    //                     &InfoCache::refreshFileInfo);
+    //             watcher->startWatcher();
+    //         }
+    //         watcher->addCacheInfoConnectSize();
+    //     }
+    // }
 
     // 插入到主和副的所有缓存中
     d->status = kCacheCopy;
     {
-        QWriteLocker wlk(&d->mianLock);
+        QWriteLocker wlk(&d->mainLock);
         d->mainCache.insert(url, info);
     }
     d->status = kCacheMain;
@@ -192,17 +194,18 @@ void InfoCache::cacheInfo(const QUrl url, const FileInfoPointer info)
  *
  * \return
  */
-void InfoCache::updateSortTimeWorker(const QUrl url)
+bool InfoCache::updateSortTimeWorker(const QUrl url)
 {
     Q_D(InfoCache);
     if (d->cacheWorkerStoped)
-        return;
+        return false;
     auto time = QDateTime::currentMSecsSinceEpoch();
     auto key = QString::number(time) + QString("-") + url.toString();
-    if (d->urlTimeSortMap.contains(url))
-        d->timeToUrlMap.remove(d->urlTimeSortMap.value(url));
+    if (d->urlTimeSortHash.contains(url))
+        d->timeToUrlMap.remove(d->urlTimeSortHash.value(url));
     d->timeToUrlMap.insert(key, url);
-    d->urlTimeSortMap.insert(url, key);
+    d->urlTimeSortHash.insert(url, key);
+    return d->timeToUrlMap.count() > kCacheFileinfoCount;
 }
 
 void InfoCache::stop()
@@ -229,11 +232,11 @@ void InfoCache::removeCaches(const QList<QUrl> urls)
     d->status = kCacheCopy;
     QMap<QUrl, FileInfoPointer> infos;
     {
-        QWriteLocker wlk(&d->mianLock);
+        QWriteLocker wlk(&d->mainLock);
         for (const auto &url : urls) {
             auto info = d->mainCache.take(url);
             if (info)
-                infos.insert(url, d->mainCache.take(url));
+                infos.insert(url, info);
         }
     }
     if (d->cacheWorkerStoped)
@@ -241,8 +244,6 @@ void InfoCache::removeCaches(const QList<QUrl> urls)
     // 断开监视器监视
     if (infos.size() > 0)
         emit cacheDisconnectWatcher(infos);
-    // 移除时间队列
-    emit cacheRemoveInfosTime(urls);
 
     // 设置读取主缓存和插入到主缓存中
     d->status = kCacheMain;
@@ -267,7 +268,7 @@ FileInfoPointer InfoCache::getCacheInfo(const QUrl &url)
     // 读取副缓存和临时缓存返回
     FileInfoPointer info(nullptr);
     if (d->status == kCacheMain) {   // 可以读取主缓存返回
-        QReadLocker wlk(&d->mianLock);
+        QReadLocker wlk(&d->mainLock);
         info = d->mainCache.value(url);
     } else {
         QReadLocker wlk(&d->copyLock);
@@ -279,6 +280,25 @@ FileInfoPointer InfoCache::getCacheInfo(const QUrl &url)
         emit cacheUpdateInfoTime(url);
 
     return info;
+}
+
+void InfoCache::clearCachedExtendedAttribute(ExtInfoType type)
+{
+    Q_D(InfoCache);
+    {
+        QReadLocker lk(&d->mainLock);
+        for (const auto &info : d->mainCache) {
+            if (info)
+                info->setExtendedAttributes(type, QVariant());
+        }
+    }
+    {
+        QReadLocker lk(&d->copyLock);
+        for (const auto &info : d->copyCache) {
+            if (info)
+                info->setExtendedAttributes(type, QVariant());
+        }
+    }
 }
 /*!
  * \brief refreshFileInfo 刷新缓存fileinfo
@@ -293,6 +313,49 @@ void InfoCache::refreshFileInfo(const QUrl &url)
     if (info)
         info->updateAttributes();
 }
+
+void InfoCache::addWatcherTimeInfo(const QList<QUrl> &urls)
+{
+    if (d->cacheWorkerStoped)
+        return;
+
+    auto time = QDateTime::currentMSecsSinceEpoch();
+    for (const auto &url : urls) {
+        if (d->cacheWorkerStoped)
+            return;
+        auto key = QString::number(time) + QString("-") + url.toString();
+        if (d->urlTimeSortWatcherHash.contains(url))
+            d->timeToUrlWatcherMap.remove(d->urlTimeSortWatcherHash.value(url));
+        d->timeToUrlWatcherMap.insert(key, url);
+        d->urlTimeSortWatcherHash.insert(url, key);
+    }
+
+    if (d->timeToUrlWatcherMap.count() <= kCacheFileWatcherCount)
+        return;
+
+    // 超出限制移除先进入的watcher
+    auto it = d->timeToUrlWatcherMap.begin();
+    while (d->urlTimeSortWatcherHash.size() > kCacheFileWatcherCount
+           && it != d->timeToUrlWatcherMap.end()) {
+        if (d->cacheWorkerStoped)
+            return;
+        auto url = it.value();
+        d->urlTimeSortWatcherHash.remove(url);
+        WatcherCache::instance().removeCacheWatcher(url, false);
+        it = d->timeToUrlWatcherMap.erase(it);
+    }
+}
+
+void InfoCache::removeWatcherTimeInfo(const QList<QUrl> &urls)
+{
+    for (const auto &url : urls) {
+        if (d->cacheWorkerStoped)
+            return;
+        if (d->urlTimeSortWatcherHash.contains(url)) {
+            d->timeToUrlWatcherMap.remove(d->urlTimeSortWatcherHash.take(url));
+        }
+    }
+}
 /*!
  * \brief timeRemoveCache 定时检查哪些fileinfo要移除
  *
@@ -302,14 +365,14 @@ void InfoCache::timeRemoveCache()
 {
     Q_D(InfoCache);
     // 取出哪些url的时间超出了u
-    qint64 delCount = d->urlTimeSortMap.size() < kCacheFileinfoCount ? 0 : d->urlTimeSortMap.size() - kCacheFileinfoCount;
+    qint64 delCount = d->urlTimeSortHash.size() < kCacheFileinfoCount ? 0 : d->urlTimeSortHash.size() - kCacheFileinfoCount;
     QList<QUrl> delList;
-    foreach (const auto time, d->timeToUrlMap.uniqueKeys()) {
+    foreach (const auto time, d->timeToUrlMap.keys()) {
         if (d->cacheWorkerStoped)
             return;
 
         if (time < QString::number(QDateTime::currentDateTime().toMSecsSinceEpoch() - kCacheRemoveTime)) {
-            delList.append(d->timeToUrlMap.values(time));
+            delList.append(d->timeToUrlMap.value(time));
             continue;
         }
 
@@ -317,7 +380,12 @@ void InfoCache::timeRemoveCache()
             break;
         }
 
-        delList.append(d->timeToUrlMap.values(time));
+        delList.append(d->timeToUrlMap.value(time));
+    }
+    for (auto url : delList) {
+        if (d->urlTimeSortHash.contains(url)) {
+            d->timeToUrlMap.remove(d->urlTimeSortHash.take(url));
+        }
     }
     // 发送异步消息 告诉移除线程创建移除线程移除，考虑是否是使用线程一直还是使用临时线程（使用临时线程）
     if (delList.size() > 0 && !d->cacheWorkerStoped)
@@ -327,10 +395,21 @@ void InfoCache::timeRemoveCache()
 void InfoCache::removeInfosTimeWorker(const QList<QUrl> urls)
 {
     for (auto url : urls) {
-        if (d->urlTimeSortMap.contains(url)) {
-            d->timeToUrlMap.remove(d->urlTimeSortMap.take(url));
+        if (d->urlTimeSortHash.contains(url)) {
+            d->timeToUrlMap.remove(d->urlTimeSortHash.take(url));
         }
     }
+}
+
+void InfoCache::updateSortTimeWatcherWorker(const QList<QUrl> &urls, const bool add)
+{
+    Q_ASSERT(qApp->thread() != QThread::currentThread());
+    Q_D(InfoCache);
+
+    if (add)
+        return addWatcherTimeInfo(urls);
+
+    removeInfosTimeWorker(urls);
 }
 
 void InfoCache::fileAttributeChanged(const QUrl url)
@@ -359,24 +438,6 @@ void CacheWorker::removeCaches(const QList<QUrl> urls)
     InfoCache::instance().removeCaches(urls);
 }
 
-void CacheWorker::updateInfoTime(const QUrl url)
-{
-    Q_ASSERT(qApp->thread() != QThread::currentThread());
-    InfoCache::instance().updateSortTimeWorker(url);
-}
-
-void CacheWorker::dealRemoveInfo()
-{
-    Q_ASSERT(qApp->thread() != QThread::currentThread());
-    InfoCache::instance().timeRemoveCache();
-}
-
-void CacheWorker::removeInfosTime(const QList<QUrl> urls)
-{
-    Q_ASSERT(qApp->thread() != QThread::currentThread());
-    InfoCache::instance().removeInfosTimeWorker(urls);
-}
-
 void CacheWorker::disconnectWatcher(const QMap<QUrl, FileInfoPointer> infos)
 {
     Q_ASSERT(qApp->thread() != QThread::currentThread());
@@ -386,9 +447,11 @@ void CacheWorker::disconnectWatcher(const QMap<QUrl, FileInfoPointer> infos)
 InfoCacheController::~InfoCacheController()
 {
     removeTimer->stop();
-    thread->quit();
     InfoCache::instance().stop();
+    thread->quit();
     thread->wait();
+    threadUpdate->quit();
+    threadUpdate->wait();
 }
 
 InfoCacheController &InfoCacheController::instance()
@@ -412,8 +475,13 @@ FileInfoPointer InfoCacheController::getCacheInfo(const QUrl &url)
     return InfoCache::instance().getCacheInfo(url);
 }
 
+void InfoCacheController::clearCachedExtendedAttribute(ExtInfoType type)
+{
+    InfoCache::instance().clearCachedExtendedAttribute(type);
+}
+
 InfoCacheController::InfoCacheController(QObject *parent)
-    : QObject(parent), thread(new QThread), worker(new CacheWorker), removeTimer(new QTimer)
+    : QObject(parent), thread(new QThread), worker(new CacheWorker), removeTimer(new QTimer), threadUpdate(new QThread), workerUpdate(new TimeToUpdateCache)
 {
     init();
 }
@@ -421,19 +489,53 @@ InfoCacheController::InfoCacheController(QObject *parent)
 void InfoCacheController::init()
 {
     removeTimer->moveToThread(qApp->thread());
-    connect(removeTimer.data(), &QTimer::timeout, worker.data(), &CacheWorker::dealRemoveInfo, Qt::QueuedConnection);
+    connect(removeTimer.data(), &QTimer::timeout, workerUpdate.data(),
+            &TimeToUpdateCache::dealRemoveInfo, Qt::QueuedConnection);
+    connect(&InfoCache::instance(), &InfoCache::cacheUpdateInfoTime, workerUpdate.data(),
+            &TimeToUpdateCache::updateInfoTime, Qt::QueuedConnection);
     connect(this, &InfoCacheController::cacheFileInfo, worker.data(), &CacheWorker::cacheInfo, Qt::QueuedConnection);
     connect(this, &InfoCacheController::removeCacheFileInfo, worker.data(), &CacheWorker::removeCaches, Qt::QueuedConnection);
     connect(&InfoCache::instance(), &InfoCache::cacheRemoveCaches, worker.data(), &CacheWorker::removeCaches, Qt::QueuedConnection);
-    connect(&InfoCache::instance(), &InfoCache::cacheRemoveInfosTime, worker.data(), &CacheWorker::removeInfosTime, Qt::QueuedConnection);
     connect(&InfoCache::instance(), &InfoCache::cacheDisconnectWatcher, worker.data(), &CacheWorker::disconnectWatcher, Qt::QueuedConnection);
+    connect(&WatcherCache::instance(), &WatcherCache::updateWatcherTime,
+            workerUpdate.data(), &TimeToUpdateCache::updateWatcherTime, Qt::QueuedConnection);
 
     worker->moveToThread(thread.data());
     thread->start();
+    workerUpdate->moveToThread(threadUpdate.data());
+    threadUpdate->start();
     removeTimer->setInterval(kRotationTrainingTime);
     removeTimer->start();
 }
 
+TimeToUpdateCache::~TimeToUpdateCache()
+{
 }
 
-//开线程移除缓存和同步缓存操作
+void TimeToUpdateCache::updateInfoTime(const QUrl url)
+{
+    Q_ASSERT(qApp->thread() != QThread::currentThread());
+    if (InfoCache::instance().updateSortTimeWorker(url))
+        InfoCache::instance().timeRemoveCache();
+}
+
+void TimeToUpdateCache::dealRemoveInfo()
+{
+    Q_ASSERT(qApp->thread() != QThread::currentThread());
+    InfoCache::instance().timeRemoveCache();
+}
+
+void TimeToUpdateCache::updateWatcherTime(const QList<QUrl> &urls, const bool add)
+{
+    Q_ASSERT(qApp->thread() != QThread::currentThread());
+    InfoCache::instance().updateSortTimeWatcherWorker(urls, add);
+}
+
+TimeToUpdateCache::TimeToUpdateCache(QObject *parent)
+    : QObject(parent)
+{
+}
+
+}
+
+// 开线程移除缓存和同步缓存操作

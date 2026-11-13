@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,13 +38,21 @@ private slots:
     void onAllPluginsStarted();
 
 private:
+    // Extension view functions for detailspace
     static QWidget *createTagWidgetForPropertyDialog(const QUrl &url);
     static QWidget *createTagWidgetForDetailView(const QUrl &url);
+    static void updateTagWidgetForDetailView(QWidget *widget, const QUrl &url);
+    static bool shouldShowTagWidget(const QUrl &url);
+
     void followEvents();
     void bindScene(const QString &parentScene);
     void onMenuSceneAdded(const QString &scene);
     void bindEvents();
     void bindWindows();
+    void regToPropertyDialog();
+    void regToDetailspace();
+    void registerPlugin(const QString &pluginName, std::function<void()> callback);
+    bool waitForPlugin(const QString &pluginName, std::function<void()> callback);
 
     QSet<QString> menuScenes;
     bool subscribedEvent { false };

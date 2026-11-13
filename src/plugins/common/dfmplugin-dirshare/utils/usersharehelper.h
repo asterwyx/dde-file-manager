@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,7 +38,7 @@ public:
     bool share(const QVariantMap &info);
     bool isUserSharePasswordSet(const QString &username);
     void setSambaPasswd(const QString &userName, const QString &passwd);
-    void removeShareByPath(const QString &path);
+    bool removeShareByPath(const QString &path);
     int readPort();
     ShareInfoList shareInfos();
     ShareInfo shareInfoByPath(const QString &path);
@@ -58,6 +58,7 @@ Q_SIGNALS:
     void shareCountChanged(int count);
     void shareAdded(const QString &path);
     void shareRemoved(const QString &path);
+    void shareChanged(const QString &path);
     void shareRemoveFailed(const QString &path);
     void sambaPasswordSet(bool success);
 
@@ -73,7 +74,7 @@ private:
     void initConnect();
     void initMonitorPath();
 
-    void removeShareByShareName(const QString &name);
+    bool removeShareByShareName(const QString &name, bool silent = false);
     void removeShareWhenShareFolderDeleted(const QString &deletedPath);
     ShareInfo getOldShareByNewShare(const ShareInfo &newShare);
 
@@ -83,14 +84,17 @@ private:
     int validShareInfoCount() const;
 
     QPair<bool, QString> startSmbService();
-    bool setSmbdAutoStart();
 
     bool isValidShare(const ShareInfo &info) const;
 
     void emitShareCountChanged(int count);
     void emitShareAdded(const QString &path);
     void emitShareRemoved(const QString &path);
+    void emitShareChanged(const QString &path);
     void emitShareRemoveFailed(const QString &path);
+
+    // Lazy initialization for D-Bus interface to avoid unnecessary service activation
+    QDBusInterface *getUserShareInterface();
 
 private:
     QTimer *pollingSharesTimer;

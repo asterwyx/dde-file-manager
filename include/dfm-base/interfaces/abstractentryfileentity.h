@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,6 +10,8 @@
 #include <QUrl>
 #include <QIcon>
 #include <QDebug>
+#include <QObject>
+#include <QVariant>
 
 namespace dfmbase {
 
@@ -49,7 +51,7 @@ public:
     virtual bool showUsageSize() const = 0;
     virtual EntryOrder order() const = 0;
 
-    virtual inline void refresh() {}
+    virtual inline void refresh() { }
     virtual inline quint64 sizeTotal() const { return 0; }
     virtual inline quint64 sizeUsage() const { return 0; }
     virtual inline QString description() const { return {}; }
@@ -58,6 +60,7 @@ public:
     virtual inline bool renamable() const { return false; }
     virtual inline QVariantHash extraProperties() const { return datas; }
     virtual inline void setExtraProperty(const QString &key, const QVariant &val) { datas[key] = val; }
+    virtual inline QString editDisplayText() const { return displayName(); };
 
 protected:
     QUrl entryUrl {};

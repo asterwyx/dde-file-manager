@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,8 +8,6 @@
 #include "backgroundmanager.h"
 #include "backgroundservice.h"
 
-#include <com_deepin_wm.h>
-
 #include <QObject>
 
 DDP_BACKGROUND_BEGIN_NAMESPACE
@@ -18,33 +16,53 @@ class BackgroundBridge : public QObject
 {
     Q_OBJECT
 public:
+    enum class WallpaperStyle {
+        Fill = 0,        // 填充
+        Fit,             // 适应
+        Stretch,         // 拉伸
+        Flatten,         // 平铺
+        Center           // 居中
+    };
+
     struct Requestion
     {
         QString screen;
         QString path;
         QSize size;
         QPixmap pixmap;
+        WallpaperStyle style { WallpaperStyle::Fill };
     };
+
 public:
     explicit BackgroundBridge(class BackgroundManagerPrivate *ptr);
     ~BackgroundBridge();
+
 public:
-    inline bool isRunning() const {
+    inline bool isRunning() const
+    {
         return future.isRunning();
     }
-    inline bool isForce() const {
+    inline bool isForce() const
+    {
         return force;
     }
-    inline void setRepeat() {
+    inline void setRepeat()
+    {
         repeat = true;
     }
     void request(bool refresh);
     void forceRequest();
     void terminate(bool wait);
     Q_INVOKABLE void onFinished(void *pData);
-    static QPixmap getPixmap(const QString &path, const QPixmap &defalutPixmap = QPixmap());
+    static QPixmap getPixmap(const QString &path, const QSize &targetSize, const QPixmap &defaultPixmap = QPixmap());
+
 private:
+    void queryCacheAndClassify(Requestion &req, QList<Requestion> &cachedRequests, QList<Requestion> &uncachedRequests);
+    void processRequests(const QList<Requestion> &cachedRequests, const QList<Requestion> &uncachedRequests, bool forceMode = false);
     static void runUpdate(BackgroundBridge *self, QList<Requestion> reqs);
+    static QPixmap processPixmap(const QPixmap &originalPixmap, WallpaperStyle style, const QSize &targetSize);
+    static int getValueFromJson(QString json, const QString &screenName);
+
 private:
     class BackgroundManagerPrivate *d = nullptr;
     volatile bool getting = false;
@@ -77,4 +95,4 @@ public:
 
 DDP_BACKGROUND_END_NAMESPACE
 
-#endif // BACKGROUNDMANAGER_P_H
+#endif   // BACKGROUNDMANAGER_P_H

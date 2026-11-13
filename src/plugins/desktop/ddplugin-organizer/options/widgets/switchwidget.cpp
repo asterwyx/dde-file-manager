@@ -1,11 +1,10 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "switchwidget.h"
 
 #include <DPalette>
-#include <DApplicationHelper>
 
 #include <QPainter>
 
@@ -15,12 +14,14 @@ using namespace ddplugin_organizer;
 SwitchWidget::SwitchWidget(const QString &title, QWidget *parent)
     : EntryWidget(new QLabel(title), new DSwitchButton(), parent)
 {
-    label = qobject_cast<QLabel* >(leftWidget);
+    label = qobject_cast<QLabel *>(leftWidget);
     label->setParent(this);
     label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     switchBtn = qobject_cast<DSwitchButton *>(rightWidget);
     switchBtn->setParent(this);
+    switchBtn->setObjectName("SwitchBtn");
+    switchBtn->setAccessibleName("SwitchBtn");
 
     connect(switchBtn, &DSwitchButton::toggled, this, &SwitchWidget::checkedChanged);
 }

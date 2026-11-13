@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -198,21 +198,17 @@ inline constexpr char kAcEditVaultRemovePassword[] { "edit_vault_remove_password
 inline constexpr char kAcBtnVaultRemovePasswordHint[] { "btn_vault_remove_passwordHint" };
 }
 
-inline constexpr char kDeamonServiceName[] { "com.deepin.filemanager.daemon" };
-#ifdef COMPILE_ON_V23
+inline constexpr char kDeamonServiceName[] { "org.deepin.Filemanager.AccessControlManager" };
 inline constexpr char kAppSessionService[] { "org.deepin.dde.SessionManager1" };
 inline constexpr char kAppSessionPath[] { "/org/deepin/dde/SessionManager1" };
-#else
-inline constexpr char kAppSessionService[] { "com.deepin.SessionManager" };
-inline constexpr char kAppSessionPath[] { "/com/deepin/SessionManager" };
-#endif
+
 inline constexpr char kNetWorkDBusServiceName[] { "org.deepin.service.SystemNetwork" };
 inline constexpr char kNetWorkDBusPath[] { "/org/deepin/service/SystemNetwork" };
 inline constexpr char kNetWorkDBusInterfaces[] { "org.deepin.service.SystemNetwork" };
 
-inline constexpr char kFileManagerDBusServiceName[] { "org.deepin.filemanager.server" };
-inline constexpr char kFileManagerVaultDBusPath[] { "/org/deepin/filemanager/server/VaultManager" };
-inline constexpr char kFileManagerVaultDBusInterfaces[] { "org.deepin.filemanager.server.VaultManager" };
+inline constexpr char kFileManagerDBusDaemonName[] { "org.deepin.Filemanager.Daemon" };
+inline constexpr char kFileManagerVaultDBusPath[] { "/org/deepin/Filemanager/Daemon/VaultManager" };
+inline constexpr char kFileManagerVaultDBusInterfaces[] { "org.deepin.Filemanager.Daemon.VaultManager" };
 
 enum RemoveWidgetType : int {
     kPasswordWidget = 0,
@@ -229,7 +225,27 @@ enum class Connectivity {
     Noconnectivity,
     Portal,
     Limited,
-    Full        // 主机已连接到网络，并且似乎能够访问完整的Internet
+    Full   // 主机已连接到网络，并且似乎能够访问完整的Internet
+};
+
+enum EncryptMode {
+    kKeyMode = 0,   // 密钥加密
+    kTransparentMode   // 透明加密
+};
+
+// 加密信息
+struct EncryptInfo
+{
+    EncryptMode mode;
+    QString password;
+    QString hint;
+    QString keyPath;
+};
+
+struct Result
+{
+    bool result;
+    QString message;
 };
 
 inline constexpr char kVaultDConfigName[] { "org.deepin.dde.file-manager.vault" };

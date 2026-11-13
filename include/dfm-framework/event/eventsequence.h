@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,7 +26,7 @@ public:
     bool traversal();
     bool traversal(const QVariantList &params);
     template<class T, class... Args>
-    inline bool traversal(T param, Args &&... args)
+    inline bool traversal(T param, Args &&...args)
     {
         QVariantList ret;
         makeVariantList(&ret, param, std::forward<Args>(args)...);
@@ -67,6 +67,7 @@ public:
         QMutexLocker guard(&sequenceMutex);
         for (auto handler : list) {
             if (handler.compare(obj, method)) {
+
                 if (!list.removeOne(handler)) {
                     qCWarning(logDPF) << "Cannot remove: " << handler.objectIndex->objectName();
                     ret = false;
@@ -136,7 +137,7 @@ public:
     }
 
     template<class T, class... Args>
-    inline bool run(const QString &space, const QString &topic, T param, Args &&... args)
+    inline bool run(const QString &space, const QString &topic, T param, Args &&...args)
     {
         Q_ASSERT(topic.startsWith(kHookStrategePrefix));
         threadEventAlert(space, topic);
@@ -144,7 +145,7 @@ public:
     }
 
     template<class T, class... Args>
-    inline bool run(EventType type, T param, Args &&... args)
+    inline bool run(EventType type, T param, Args &&...args)
     {
         threadEventAlert(type);
         QReadLocker lk(&rwLock);

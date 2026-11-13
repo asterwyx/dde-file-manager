@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,9 +9,12 @@
 
 #include <dfm-base/file/local/localfilehandler.h>
 #include <dfm-base/utils/dialogmanager.h>
+#include <dfm-base/utils/windowutils.h>
+#include <dfm-base/utils/iconutils.h>
 #include <dfm-base/base/schemefactory.h>
 #include <dfm-base/base/device/devicemanager.h>
 #include <dfm-base/base/device/deviceproxymanager.h>
+#include <dfm-base/widgets/filemanagerwindowsmanager.h>
 
 #include <dfm-framework/event/event.h>
 
@@ -20,11 +23,27 @@
 #include <QVBoxLayout>
 #include <QTextEdit>
 #include <QLabel>
+#include <QScreen>
 
 DFMBASE_USE_NAMESPACE
 
 using namespace dfmplugin_burn;
 using namespace GlobalServerDefines;
+
+namespace {
+// Result dialogs outlive the TaskDialog: it is closed by requestRemoveTaskWidget
+// inside the dialog's own nested event loop, and on Wayland unmapping the
+// transient parent tears the child dialog down with it (appears then vanishes).
+// Parent to the last activated file-manager window instead; fall back to
+// nullptr when no main window exists.
+QWidget *resultDialogParent()
+{
+    QWidget *win = FMWindowsIns.findWindowById(FMWindowsIns.lastActivedWindowId());
+    if (win)
+        return win;
+    return qApp->activeWindow();
+}
+}   // namespace
 
 BurnJobManager *BurnJobManager::instance()
 {
@@ -41,6 +60,12 @@ void BurnJobManager::startEraseDisc(const QString &dev)
     initBurnJobConnect(job);
     connect(qobject_cast<EraseJob *>(job), &EraseJob::eraseFinished, this, [job, this](bool result) {
         startAuditLogForEraseDisc(job->currentDeviceInfo(), result);
+        if (!result && !job->failureDialogShown) {
+            DialogManagerInstance->showErrorDialog(tr("Erase failed"),
+                                                   tr("Unable to complete disc erasure. "
+                                                      "This may be due to read/write limitations or the disc media status. "
+                                                      "Please check the relevant settings and try again."));
+        }
     });
     job->start();
 }
@@ -164,11 +189,13 @@ void BurnJobManager::initBurnJobConnect(AbstractBurnJob *job)
     connect(job, &AbstractBurnJob::requestFailureDialog, this, &BurnJobManager::showOpticalJobFailureDialog);
     connect(job, &AbstractBurnJob::requestErrorMessageDialog, DialogManagerInstance, &DialogManager::showErrorDialog);
     connect(job, &AbstractBurnJob::requestCloseTab, this, [](const QUrl &url) {
-        dpfSlotChannel->push("dfmplugin_workspace", "slot_Tab_Close", url);
+        dpfSlotChannel->push("dfmplugin_titlebar", "slot_Tab_Close", url);
     });
     connect(job, &AbstractBurnJob::requestReloadDisc, this, [](const QString &devId) {
         DevMngIns->mountBlockDevAsync(devId, {}, [devId](bool, const DFMMOUNT::OperationErrorInfo &, const QString &) {
             DevProxyMng->reloadOpticalInfo(devId);
+            // WORKAROUND: 由于内核原因，reload总是失败，暂擦除后弹出光盘
+            DeviceManager::instance()->ejectBlockDevAsync(devId);
         });
     });
     connect(job, &AbstractBurnJob::burnFinished, this, [this, job](int type, bool result) {
@@ -183,6 +210,7 @@ void BurnJobManager::initDumpJobConnect(DumpISOImageJob *job)
 {
     Q_ASSERT(job);
     connect(job, &AbstractBurnJob::finished, job, &QObject::deleteLater);
+    connect(job, &AbstractBurnJob::requestErrorMessageDialog, DialogManagerInstance, &DialogManager::showErrorDialog);
     connect(job, &DumpISOImageJob::requestOpticalDumpISOSuccessDialog, this, &BurnJobManager::showOpticalDumpISOSuccessDialog);
     connect(job, &DumpISOImageJob::requestOpticalDumpISOFailedDialog, this, &BurnJobManager::showOpticalDumpISOFailedDialog);
 }
@@ -215,19 +243,21 @@ bool BurnJobManager::deleteStagingDir(const QUrl &url)
 
 void BurnJobManager::showOpticalJobCompletionDialog(const QString &msg, const QString &icon)
 {
-    DDialog d(qApp->activeWindow());
+    DDialog d(resultDialogParent());
     d.setIcon(QIcon::fromTheme(icon));
     d.setTitle(msg);
     d.addButton(tr("OK", "button"), true, DDialog::ButtonRecommend);
     d.setDefaultButton(0);
     d.getButton(0)->setFocus();
+    d.move(WindowUtils::cursorScreen()->geometry().center()
+           - QPoint(d.width() / 2, d.height() / 2));
     d.exec();
 }
 
 void BurnJobManager::showOpticalJobFailureDialog(int type, const QString &err, const QStringList &details)
 {
-    DDialog d(qApp->activeWindow());
-    d.setIcon(QIcon::fromTheme("dialog-error"));
+    DDialog d(resultDialogParent());
+    d.setIcon(QIcon::fromTheme("dde-file-manager"));
     QString failureType;
     switch (type) {
     case AbstractBurnJob::kOpticalBlank:
@@ -240,13 +270,19 @@ void BurnJobManager::showOpticalJobFailureDialog(int type, const QString &err, c
     case AbstractBurnJob::kOpticalCheck:
         failureType = tr("Data verification failed");
         break;
+    case AbstractBurnJob::kOpticalChecksum:
+        failureType = tr("File verification failed");
+        break;
     }
     QString failureStr = QString(tr("%1: %2")).arg(failureType).arg(err);
     d.setTitle(failureStr);
     QWidget *detailsw = new QWidget(&d);
     detailsw->setLayout(new QVBoxLayout());
     QTextEdit *te = new QTextEdit();
-    te->setPlainText(details.join('\n'));
+    QStringList detailContent = details;
+    if (detailContent.isEmpty() && !err.isEmpty())
+        detailContent << err;
+    te->setPlainText(detailContent.join('\n'));
     te->setReadOnly(true);
     te->hide();
     detailsw->layout()->addWidget(te);
@@ -275,12 +311,14 @@ void BurnJobManager::showOpticalJobFailureDialog(int type, const QString &err, c
     d.addButton(tr("Confirm", "button"), true, DDialog::ButtonRecommend);
     d.setDefaultButton(1);
     d.getButton(1)->setFocus();
+    d.move(WindowUtils::cursorScreen()->geometry().center()
+           - QPoint(d.width() / 2, d.height() / 2));
     d.exec();
 }
 
 void BurnJobManager::showOpticalDumpISOSuccessDialog(const QUrl &imageUrl)
 {
-    DDialog d(qApp->activeWindow());
+    DDialog d(resultDialogParent());
     d.setFixedSize(400, 242);
     d.setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Expanding);
     d.setIcon(QIcon::fromTheme("media-optical").pixmap(32, 32));
@@ -298,7 +336,7 @@ void BurnJobManager::showOpticalDumpISOSuccessDialog(const QUrl &imageUrl)
 
     QFrame *contentFrame { new QFrame };
     QVBoxLayout *mainLayout { new QVBoxLayout };
-    mainLayout->setMargin(0);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     contentFrame->setLayout(mainLayout);
     d.addContent(contentFrame);
 
@@ -315,16 +353,17 @@ void BurnJobManager::showOpticalDumpISOSuccessDialog(const QUrl &imageUrl)
 
     // add icon label
     QLabel *iconLabel { new QLabel };
-    iconLabel->setPixmap(QIcon::fromTheme("dialog-ok").pixmap(96, 96));
+    iconLabel->setPixmap(IconUtils::hiDpiPixmap(QIcon::fromTheme("dialog-ok"), QSize(96, 96), resultDialogParent()));
     mainLayout->addWidget(iconLabel, 0, Qt::AlignTop | Qt::AlignCenter);
 
-    d.moveToCenter();
+    d.move(WindowUtils::cursorScreen()->geometry().center()
+           - QPoint(d.width() / 2, d.height() / 2));
     d.exec();
 }
 
 void BurnJobManager::showOpticalDumpISOFailedDialog()
 {
-    DDialog d(qApp->activeWindow());
+    DDialog d(resultDialogParent());
     d.setFixedSize(400, 242);
     d.setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Expanding);
     d.setIcon(QIcon::fromTheme("media-optical").pixmap(32, 32));
@@ -332,7 +371,7 @@ void BurnJobManager::showOpticalDumpISOFailedDialog()
 
     QFrame *contentFrame { new QFrame };
     QVBoxLayout *mainLayout { new QVBoxLayout };
-    mainLayout->setMargin(0);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     contentFrame->setLayout(mainLayout);
     d.addContent(contentFrame);
 
@@ -349,10 +388,11 @@ void BurnJobManager::showOpticalDumpISOFailedDialog()
 
     // add icon label
     QLabel *iconLabel { new QLabel };
-    iconLabel->setPixmap(QIcon::fromTheme("dialog-error").pixmap(96, 96));
+    iconLabel->setPixmap(IconUtils::hiDpiPixmap(QIcon::fromTheme("dialog-error"), QSize(96, 96), resultDialogParent()));
     mainLayout->addWidget(iconLabel, 0, Qt::AlignTop | Qt::AlignCenter);
 
-    d.moveToCenter();
+    d.move(WindowUtils::cursorScreen()->geometry().center()
+           - QPoint(d.width() / 2, d.height() / 2));
     d.exec();
 }
 

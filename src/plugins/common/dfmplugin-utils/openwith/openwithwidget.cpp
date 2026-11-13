@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,6 +20,7 @@ using namespace dfmplugin_utils;
 OpenWithWidget::OpenWithWidget(QWidget *parent)
     : DArrowLineDrawer(parent)
 {
+    MimesAppsManager::instance()->initMimeTypeApps();
     initUI();
 }
 
@@ -39,6 +40,7 @@ void OpenWithWidget::initUI()
     setExpand(false);
 
     openWithListWidget = new QListWidget(this);
+    openWithListWidget->setAccessibleName("OpenWithListWidget");
     openWithListWidget->setSpacing(8);
     openWithListWidget->setObjectName("OpenWithListWidget");
     openWithListWidget->setFrameShape(QFrame::HLine);
@@ -48,6 +50,7 @@ void OpenWithWidget::initUI()
     DFontSizeManager::instance()->bind(openWithListWidget, DFontSizeManager::SizeType::T7, QFont::Normal);
 
     openWithBtnGroup = new QButtonGroup(openWithListWidget);
+    openWithBtnGroup->setObjectName("OpenWithBtnGroup");
 
     this->setContent(openWithListWidget);
 

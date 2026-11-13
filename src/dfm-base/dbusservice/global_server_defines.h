@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -80,7 +80,22 @@ inline constexpr char kConnectionBus[] { "ConnectionBus" };
 inline constexpr char kUDisks2Size[] { "UDisks2Size" };
 inline constexpr char kDriveModel[] { "DriveModel" };
 inline constexpr char kPreferredDevice[] { "PreferredDevice" };
+inline constexpr char kConfiguration[] { "Configuration" };
+inline constexpr char kSymlinks[] { "Symlinks" };
 }   // namespace DeviceProperty
+
+/*!
+ * brief Recent property information
+ */
+namespace RecentProperty {
+inline constexpr char kPath[] { "Path" };
+inline constexpr char kHref[] { "Href" };
+inline constexpr char kModified[] { "modified" };
+
+inline constexpr char kAppName[] { "AppName" };
+inline constexpr char kAppExec[] { "AppExec" };
+inline constexpr char kMimeType[] { "MimeType" };
+}   // namespace RecentProperty
 
 /*!
  * \brief Options for processing the device list interface,
@@ -114,6 +129,28 @@ inline constexpr char kPasswdSaveMode[] { "savePasswd" };
 inline constexpr char kAnonymous[] { "anonymous" };
 inline constexpr char kMessage[] { "message" };
 }   // namespace NetworkMountParamKey
+
+namespace OpticalShareDBusInfo {
+inline constexpr char kService[] { "org.deepin.Filemanager.Daemon" };
+inline constexpr char kPath[] { "/org/deepin/Filemanager/Daemon/OpticalShare" };
+inline constexpr char kInterface[] { "org.deepin.Filemanager.OpticalShare" };
+}   // namespace OpticalShareDBusInfo
+
+namespace OpticalShareGroup {
+inline constexpr char kBurnState[] { "BurnState" };
+inline constexpr char kBurnAttribute[] { "BurnAttribute" };
+}   // namespace OpticalShareGroup
+
+namespace OpticalShareField {
+inline constexpr char kId[] { "id" };
+inline constexpr char kWorking[] { "Working" };
+inline constexpr char kOwnerUid[] { "ownerUid" };
+inline constexpr char kTimestamp[] { "timestamp" };
+inline constexpr char kTotalSize[] { "totalSize" };
+inline constexpr char kUsedSize[] { "usedSize" };
+inline constexpr char kMediaType[] { "mediaType" };
+inline constexpr char kWriteSpeed[] { "writeSpeed" };
+}   // namespace OpticalShareField
 
 }   // namespace GlobalServerDefines
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,6 +12,9 @@
 #include <QDebug>
 #include <QUrl>
 #include <QIcon>
+#include <QDir>
+
+#include <unistd.h>
 
 DPUTILS_BEGIN_NAMESPACE
 DFMBASE_USE_NAMESPACE
@@ -44,11 +47,46 @@ void ExtensionEmblemManagerPrivate::clearReadyLocalPath()
 
 QIcon ExtensionEmblemManagerPrivate::makeIcon(const QString &path)
 {
-    const QIcon &icon { QIcon::fromTheme(path) };
-    if (!icon.name().isEmpty())
-        return icon;
+    if (path.isEmpty()) {
+        fmDebug() << "Empty icon path provided";
+        return QIcon();
+    }
 
-    return QIcon(path);
+    QString cleanPath = QDir::cleanPath(path);
+
+    auto it = iconCaches.constFind(cleanPath);
+    if (it != iconCaches.constEnd())
+        return *it;
+
+    // 3. 尝试从主题加载
+    auto icon = QIcon::fromTheme(cleanPath);
+    if (!icon.isNull()) {
+        // 找到主题图标，存入缓存并返回
+        iconCaches.insert(cleanPath, icon);
+        return icon;
+    }
+
+    // 4. 尝试作为文件路径加载
+    // 这里进行安全检查
+    if (QDir::isAbsolutePath(cleanPath)) {
+        // 检查文件是否存在，防止无效路径反复尝试加载导致性能损耗
+        if (QFile::exists(cleanPath)) {
+            icon = QIcon(cleanPath);
+            if (!icon.isNull()) {
+                iconCaches.insert(cleanPath, icon);   // 使用原始 path 作为键，或者 cleanPath
+                return icon;
+            }
+        } else {
+            fmWarning() << "Icon file does not exist:" << cleanPath;
+        }
+    } else {
+        // 如果不是绝对路径，且 fromTheme 失败，可能是相对路径或无效路径
+        // 根据业务需求，这里可以决定是否尝试相对路径加载
+        // 出于安全考虑，通常不建议加载相对路径图标，除非有特定的基准目录
+        fmWarning() << "Icon path is not a valid theme name or absolute path:" << path << ", cleanPath:" << cleanPath;
+    }
+
+    return QIcon();
 }
 
 void EmblemIconWorker::onFetchEmblemIcons(const QList<QPair<QString, int>> &localPaths)
@@ -58,7 +96,7 @@ void EmblemIconWorker::onFetchEmblemIcons(const QList<QPair<QString, int>> &loca
         return;
 
     const auto &emblemPlugins = ExtensionPluginManager::instance().emblemPlugins();
-    std::for_each(emblemPlugins.begin(), emblemPlugins.end(), [&localPaths, this](QSharedPointer<DFMEXT::DFMExtEmblemIconPlugin> plugin) {
+    std::for_each(emblemPlugins.begin(), emblemPlugins.end(), [&localPaths, this](DFMEXT::DFMExtEmblemIconPlugin *plugin) {
         Q_ASSERT(plugin);
         for (const auto &path : localPaths) {
             if (this->parseLocationEmblemIcons(path.first, path.second, plugin))
@@ -74,13 +112,13 @@ void EmblemIconWorker::onClearCache()
     pluginCaches.clear();
 }
 
-bool EmblemIconWorker::parseLocationEmblemIcons(const QString &path, int count, QSharedPointer<dfmext::DFMExtEmblemIconPlugin> plugin)
+bool EmblemIconWorker::parseLocationEmblemIcons(const QString &path, int count, dfmext::DFMExtEmblemIconPlugin *plugin)
 {
     const auto &emblem { plugin->locationEmblemIcons(path.toStdString(), count) };
     const std::vector<DFMEXT::DFMExtEmblemIconLayout> &layouts { emblem.emblems() };
     // why add `pluginCaches` ?
     // To clear the emblem icon when a plugin returns an empty `DFMExtEmblemIconLayout`.
-    quint64 pluginAddr { reinterpret_cast<quint64>(plugin.data()) };
+    quint64 pluginAddr { reinterpret_cast<quint64>(plugin) };
     const CacheType &curPluginCache { pluginCaches.value(pluginAddr) };
     if (layouts.empty() && curPluginCache.value(path).isEmpty())
         return false;
@@ -108,9 +146,9 @@ bool EmblemIconWorker::parseLocationEmblemIcons(const QString &path, int count, 
     return true;
 }
 
-void EmblemIconWorker::parseEmblemIcons(const QString &path, int count, QSharedPointer<dfmext::DFMExtEmblemIconPlugin> plugin)
+void EmblemIconWorker::parseEmblemIcons(const QString &path, int count, dfmext::DFMExtEmblemIconPlugin *plugin)
 {
-    quint64 pluginAddr { reinterpret_cast<quint64>(plugin.data()) };
+    quint64 pluginAddr { reinterpret_cast<quint64>(plugin) };
     if (hasCachedByOtherLocationEmblem(path, pluginAddr))
         return;
     const std::vector<std::string> &icons { plugin->emblemIcons(path.toStdString()) };
@@ -311,6 +349,8 @@ bool ExtensionEmblemManager::onFetchCustomEmblems(const QUrl &url, QList<QIcon> 
                     continue;
                 }
                 const QString &iconName { group[i].first };
+                if (iconName.isEmpty())
+                    continue;
                 emblems->replace(pos, d->makeIcon(iconName));
             }
             return true;
@@ -372,8 +412,17 @@ ExtensionEmblemManager::~ExtensionEmblemManager()
 {
     Q_D(ExtensionEmblemManager);
 
-    d->workerThread.quit();
-    d->workerThread.wait();
+    // 停止定时器
+    d->readyTimer.stop();
+
+    // 确保工作线程正确退出
+    if (d->workerThread.isRunning()) {
+        d->workerThread.quit();
+        if (!d->workerThread.wait(3000)) {
+            fmWarning() << "ExtensionEmblemManager: Worker thread did not exit within 3 seconds, forcing termination";
+            _exit(1);
+        }
+    }
 }
 
 DPUTILS_END_NAMESPACE

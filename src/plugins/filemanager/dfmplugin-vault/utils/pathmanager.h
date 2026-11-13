@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,12 +16,15 @@ public:
 
 public:
     static QString vaultLockPath();
-
     static QString vaultUnlockPath();
-
+    static QString vaultPswContainerPath(const QString &baseDirPath);
+    static QString vaultEncryptPath(const QString &baseDirPath);
+    static QString vaultMountPath(const QString &baseDirPath);
     static QString makeVaultLocalPath(const QString &path = "", const QString &base = "");
-
     static QString addPathSlash(const QString &path);
+
+    static bool createDirIfNotExist(const QString &path);
+    static bool createVaultMountDir(const QString &vaultBasePath);
 signals:
 
 public slots:

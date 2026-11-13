@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,17 +34,14 @@ ReportLogManager::~ReportLogManager()
 
 void ReportLogManager::init()
 {
-    reportWorker = new ReportLogWorker();
-    if (!reportWorker->init()) {
-        reportWorker->deleteLater();
+    if (reportWorkThread || reportWorker)
         return;
-    }
 
-    reportWorkThread = new QThread();
-    connect(reportWorkThread, &QThread::finished, [&]() {
-        reportWorker->deleteLater();
-    });
+    reportWorker = new ReportLogWorker();
+    reportWorkThread = new QThread(this);
     reportWorker->moveToThread(reportWorkThread);
+    connect(reportWorkThread, &QThread::finished, reportWorker, &QObject::deleteLater);
+    connect(reportWorkThread, &QThread::started, reportWorker, &ReportLogWorker::init, Qt::QueuedConnection);
 
     initConnection();
 

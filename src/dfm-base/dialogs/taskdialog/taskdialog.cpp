@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2021 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2021 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -10,9 +10,10 @@
 #include <QListWidget>
 #include <QLayout>
 #include <QApplication>
-#include <QDesktopWidget>
 #include <QMutex>
 #include <QKeyEvent>
+#include <QScreen>
+#include <QTimer>
 
 using namespace dfmbase;
 
@@ -46,7 +47,7 @@ void TaskDialog::addTask(const JobHandlePointer taskHandler)
 
     wid = new TaskWidget(this);
 
-    connect(wid, &TaskWidget::heightChanged, this, &TaskDialog::adjustSize, Qt::QueuedConnection);
+    connect(wid, &TaskWidget::heightChanged, this, &TaskDialog::scheduleResize, Qt::QueuedConnection);
     connect(this, &TaskDialog::closed, wid, &TaskWidget::parentClose, Qt::QueuedConnection);
     taskHandler->connect(taskHandler.get(), &AbstractJobHandler::requestRemoveTaskWidget, this, &TaskDialog::removeTask);
 
@@ -78,6 +79,8 @@ void TaskDialog::initUI()
     titlebar->setAutoFillBackground(false);
 
     taskListWidget = new QListWidget(this);
+    taskListWidget->setObjectName("TaskListWidget");
+    taskListWidget->setAccessibleName("TaskListWidget");
     taskListWidget->setSelectionMode(QListWidget::NoSelection);
     taskListWidget->viewport()->setAutoFillBackground(false);
     taskListWidget->setFrameShape(QFrame::NoFrame);
@@ -98,17 +101,21 @@ void TaskDialog::initUI()
 void TaskDialog::blockShutdown()
 {
     UniversalUtils::blockShutdown(replyBlokShutDown);
-    int fd = -1;
-    if (replyBlokShutDown.isValid()) {
-        fd = replyBlokShutDown.value().fileDescriptor();
+    // 添加进入节能模式的锁定处理
+    // 防止重复调用导致 cookie 被覆盖
+    if (screenSaverCookie == kInvalidScreenSaverCookie) {
+        screenSaverCookie = UniversalUtils::lockScreenSaver();
     }
 
-    if (fd > 0) {
-        QObject::connect(this, &TaskDialog::closed, this, [this]() {
-            QDBusReply<QDBusUnixFileDescriptor> tmp = replyBlokShutDown;   //::close(fd);
-            replyBlokShutDown = QDBusReply<QDBusUnixFileDescriptor>();
-        });
-    }
+    QObject::connect(this, &TaskDialog::closed, this, [this]() {
+        QDBusReply<QDBusUnixFileDescriptor> tmp = replyBlokShutDown;   //::close(fd);
+        replyBlokShutDown = QDBusReply<QDBusUnixFileDescriptor>();
+        // 添加进入节能模式的解除锁定处理
+        if (screenSaverCookie != kInvalidScreenSaverCookie) {
+            UniversalUtils::unlockScreenSaver(screenSaverCookie);
+            screenSaverCookie = kInvalidScreenSaverCookie;
+        }
+    });
 }
 /*!
  * \brief TaskDialog::addTaskWidget 在任务进度对话框中添加一个item，并调整高度
@@ -133,10 +140,7 @@ void TaskDialog::addTaskWidget(const JobHandlePointer taskHandler, TaskWidget *w
 
     setWindowFlags(Qt::WindowMinimizeButtonHint | Qt::WindowCloseButtonHint);
     setTitle(taskListWidget->count());
-    adjustSize();
-
-    if (taskItems.count() == 1)
-        moveToCenter();
+    scheduleResize();
 
     setModal(false);
     show();
@@ -152,21 +156,39 @@ void TaskDialog::setTitle(int taskCount)
 }
 
 /*!
- * \brief TaskDialog::adjustSize 调整整个进度显示的高度，当每个item中的widget发生变化时
+ * \brief TaskDialog::scheduleResize 合并同帧内的多次几何请求，事件循环末帧只执行一次几何更新
+ * 新增/移除任务、widget 内部高度变化都会触发本方法，用布尔标志去重，
+ * 保证单帧内无论触发多少次，都只做一次 resizeAndCenter，从而消除抖动。
  */
-void TaskDialog::adjustSize(int hight)
+void TaskDialog::scheduleResize()
 {
-    auto widgit = sender();
+    if (m_resizeScheduled)
+        return;
+    m_resizeScheduled = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_resizeScheduled = false;
+        resizeAndCenter();
+    });
+}
+
+/*!
+ * \brief TaskDialog::resizeAndCenter 计算任务列表高度并一次性完成窗口高度调整与居中
+ * 将「变高/变矮」与「居中移动」合并到同一次事件处理中，中间不产生错位帧，避免视觉抖动。
+ */
+void TaskDialog::resizeAndCenter()
+{
     int listHeight = 2;
     for (int i = 0; i < taskListWidget->count(); i++) {
         QListWidgetItem *item = taskListWidget->item(i);
         auto wg = taskListWidget->itemWidget(item);
-        int h = widgit == wg && hight > 0 ? hight : wg->height();
-        item->setSizeHint(QSize(item->sizeHint().width(), h));
-        listHeight += h;
+        if (!wg)
+            continue;
+        item->setSizeHint(QSize(item->sizeHint().width(), wg->height()));
+        listHeight += wg->height();
     }
 
-    if (listHeight < qApp->desktop()->availableGeometry().height() - 60) {
+    int oldHeight = height();
+    if (listHeight < qApp->primaryScreen()->availableGeometry().height() - 60) {
         taskListWidget->setFixedHeight(listHeight);
         setFixedHeight(listHeight + 60);
         kMaxHeight = height();
@@ -175,6 +197,17 @@ void TaskDialog::adjustSize(int hight)
     }
 
     layout()->setSizeConstraint(QLayout::SetNoConstraint);
+
+    // 高度未变化时无需移动，避免无谓的窗口重定位
+    if (oldHeight == height())
+        return;
+
+    // 未显示时整体居中；已显示时仅重算纵向位置，保持水平位置不变
+    if (!isVisible()) {
+        moveToCenter();
+    } else {
+        moveYCenter();
+    }
 }
 /*!
  * \brief TaskDialog::moveYCenter 任务进度框自动调整到屏幕的中央
@@ -186,7 +219,7 @@ void TaskDialog::moveYCenter()
     if (parent()) {
         cp = static_cast<QWidget *>(parent())->geometry().center();
     } else {
-        cp = qApp->desktop()->availableGeometry().center();
+        cp = qApp->primaryScreen()->availableGeometry().center();
     }
     qr.moveCenter(cp);
     move(x(), qr.y());
@@ -215,12 +248,13 @@ void TaskDialog::removeTask()
     QListWidgetItem *item = taskItems.value(jobHandler);
     taskListWidget->removeItemWidget(item);
     taskListWidget->takeItem(taskListWidget->row(item));
+    delete item;   // 显式删除动态分配的对象
     taskItems.remove(jobHandler);
     setTitle(taskListWidget->count());
     if (taskListWidget->count() == 0) {
         close();
     } else {
-        adjustSize();
+        scheduleResize();
     }
 }
 /*!
@@ -233,7 +267,8 @@ void TaskDialog::closeEvent(QCloseEvent *event)
     while (it != taskItems.end()) {
         it.key()->operateTaskJob(AbstractJobHandler::SupportAction::kStopAction);
         taskListWidget->removeItemWidget(it.value());
-        taskListWidget->takeItem(taskListWidget->row(it.value()));
+        QListWidgetItem *item = taskListWidget->takeItem(taskListWidget->row(it.value()));
+        delete item;   // 显式删除动态分配的对象
         it = taskItems.erase(it);
     }
     emit closed();
@@ -243,7 +278,7 @@ void TaskDialog::closeEvent(QCloseEvent *event)
 
 void TaskDialog::keyPressEvent(QKeyEvent *event)
 {
-    //handle escape key press event for emitting close event
+    // handle escape key press event for emitting close event
     if (event->key() == Qt::Key_Escape) {
         emit close();
     }
@@ -252,4 +287,9 @@ void TaskDialog::keyPressEvent(QKeyEvent *event)
 
 TaskDialog::~TaskDialog()
 {
+    // 确保在析构时解锁屏幕保护程序
+    if (screenSaverCookie != kInvalidScreenSaverCookie) {
+        UniversalUtils::unlockScreenSaver(screenSaverCookie);
+        screenSaverCookie = kInvalidScreenSaverCookie;
+    }
 }

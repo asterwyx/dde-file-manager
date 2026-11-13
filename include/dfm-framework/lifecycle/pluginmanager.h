@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,9 +34,11 @@ public:
     QStringList blackList() const;
     QStringList lazyLoadList() const;
     QQueue<PluginMetaObjectPointer> readQueue() const;
+    QQueue<PluginMetaObjectPointer> loadQueue() const;
     void addPluginIID(const QString &pluginIIDs);
     void addBlackPluginName(const QString &name);
     void addLazyLoadPluginName(const QString &name);
+    void setQtVersionInsensitivePluginNames(const QStringList &names);
     void setPluginPaths(const QStringList &pluginPaths);
     void setLazyLoadFilter(std::function<bool(const QString &)> filter);
     void setBlackListFilter(std::function<bool(const QString &)> filter);

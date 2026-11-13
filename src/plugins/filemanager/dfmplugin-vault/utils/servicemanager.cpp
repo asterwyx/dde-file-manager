@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -21,6 +21,7 @@ ServiceManager::ServiceManager(QObject *parent)
 
 ServiceManager::ExpandFieldMap ServiceManager::basicViewFieldFunc(const QUrl &url)
 {
+    fmDebug() << "Vault: Basic view field function called for URL:" << url.toString();
     BasicExpand expandFiledMap;
     expandFiledMap.insert(kFilePosition, qMakePair(tr("Location"), url.url()));
 
@@ -31,6 +32,7 @@ ServiceManager::ExpandFieldMap ServiceManager::basicViewFieldFunc(const QUrl &ur
 
 ServiceManager::ExpandFieldMap ServiceManager::detailViewFieldFunc(const QUrl &url)
 {
+    fmDebug() << "Vault: Detail view field function called for URL:" << url.toString();
     BasicExpand expandFiledMap;
     ExpandFieldMap expandMap;
     Settings setting(kVaultTimeConfigFile);
@@ -40,8 +42,10 @@ ServiceManager::ExpandFieldMap ServiceManager::detailViewFieldFunc(const QUrl &u
     else
         lockedTime = setting.value(kjsonGroupName, kjsonKeyLockTime).toString();
 
-    if (!UniversalUtils::urlEquals(url, VaultHelper::instance()->rootUrl()))
+    if (!UniversalUtils::urlEquals(url, VaultHelper::instance()->rootUrl())) {
+        fmDebug() << "Vault: URL not equal to root URL, returning empty expand map";
         return expandMap;
+    }
     expandFiledMap.insert(kFileInterviewTime, qMakePair(tr("Time locked"), lockedTime));
 
     expandMap.insert(kFieldInsert, expandFiledMap);

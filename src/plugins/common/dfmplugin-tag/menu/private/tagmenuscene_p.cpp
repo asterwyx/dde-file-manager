@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -14,18 +14,20 @@ TagMenuScenePrivate::TagMenuScenePrivate(AbstractMenuScene *qq)
 {
 }
 
-QRect TagMenuScenePrivate::getSurfaceRect(QWidget *w)
+QWidget *TagMenuScenePrivate::getSurface(QWidget *w, QRect *rect)
 {
-    QRect rect;
+    QWidget *surface = nullptr;
     if (w) {
         QWidget *p = w;
         while (p = p->parentWidget()) {
             if (p->property("WidgetName").toString() == QString("organizersurface")) {
-                rect = p->rect();
+                surface = p;
+                if (rect)
+                    *rect = p->rect();
                 break;
             }
         }
     }
 
-    return rect;
+    return surface;
 }

@@ -1,6 +1,6 @@
-// SPDX-FileCopyrightText: 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2023 - 2026 ~ 2025 UnionTech Software Technology Co., Ltd.
 //
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LGPL-3.0-or-later
 
 #include "mymenuplugin.h"
 
@@ -60,11 +60,11 @@ bool MyMenuPlugin::buildNormalMenu(DFMExtMenu *main, const std::string &currentP
     (void)currentPath;
     (void)focusPath;
 
-    // 通过代理创建 action，此 action 在堆区分配，不自行释放将内存泄露！
+    // 通过代理创建 action
     auto rootAction { m_proxy->createAction() };
     rootAction->setText("角标管理");
 
-    // 通过代理创建 menu，此 menu 在堆区分配，不自行释放将内存泄露！
+    // 通过代理创建 menu
     auto menu { m_proxy->createMenu() };
 
     // 二级菜单在 Hover 中创建，以减少一级菜单显示的性能开销
@@ -120,6 +120,9 @@ bool MyMenuPlugin::buildEmptyAreaMenu(DFMExtMenu *main, const std::string &curre
         action->setText("从文件管理器打开桌面");
     else
         action->setText("打开当前路径");
+#if DFMEXT_VERSION >= DFMEXT_VERSION_CHECK(6, 6, 4)
+    action->setActionId("example.open-current-path");
+#endif
     // 添加图标，也支持图片的文件绝对路径
     // 例如：/usr/share/icons/Adwaita/16x16/emblems/emblem-generic.png
     action->setIcon("emblem-generic");
@@ -142,7 +145,27 @@ bool MyMenuPlugin::buildEmptyAreaMenu(DFMExtMenu *main, const std::string &curre
         }
     });
 
-    main->addAction(action);
+    DFMExtAction *refreshAction = nullptr;
+#if DFMEXT_VERSION >= DFMEXT_VERSION_CHECK(6, 6, 4)
+    refreshAction = main->findActionById("refresh");
+#else
+    auto actions = main->actions();
+    auto it = std::find_if(actions.cbegin(), actions.cend(), [](const DFMExtAction *action) {
+        const std::string &text = action->text();
+        return (text.find("刷新") == 0) || (text.find("Refresh") == 0);
+    });
+    if (it != actions.cend())
+        refreshAction = *it;
+#endif
+    if (refreshAction) {
+        auto separator = m_proxy->createAction();
+        separator->setSeparator(true);
+        main->insertAction(refreshAction, separator);
+        main->insertAction(refreshAction, action);
+    } else {
+        main->addAction(action);
+    }
+
     return true;
 }
 

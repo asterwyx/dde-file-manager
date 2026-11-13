@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,6 +6,7 @@
 #include <dfm-base/file/local/syncfileinfo.h>
 #include <dfm-base/utils/universalutils.h>
 #include <dfm-base/utils/systempathutil.h>
+#include <dfm-base/utils/clipboard.h>
 #include <dfm-base/base/device/deviceutils.h>
 #include <dfm-base/dfm_global_defines.h>
 
@@ -25,8 +26,10 @@ SmbBrowserEventReceiver *SmbBrowserEventReceiver::instance()
 
 bool SmbBrowserEventReceiver::detailViewIcon(const QUrl &url, QString *iconName)
 {
-    if (!iconName)
+    if (!iconName) {
+        fmWarning() << "Null icon name pointer passed to detailViewIcon";
         return false;
+    }
 
     if (UniversalUtils::urlEquals(url, QUrl(QString("%1:///").arg(Global::Scheme::kNetwork)))) {
         *iconName = SystemPathUtil::instance()->systemPathIconName("Network");
@@ -64,19 +67,24 @@ bool SmbBrowserEventReceiver::cancelMoveToTrash(quint64, const QList<QUrl> &, co
 
 bool SmbBrowserEventReceiver::hookSetTabName(const QUrl &url, QString *tabName)
 {
-    if (!tabName)
+    if (!tabName) {
+        fmWarning() << "Null tab name pointer passed to hookSetTabName";
         return false;
+    }
 
     if (UniversalUtils::urlEquals(url, QUrl("network:///"))) {
         *tabName = QObject::tr("Computers in LAN");
+        fmInfo() << "Set tab name for network root:" << *tabName;
         return true;
     }
 
-    if (url.scheme() == "smb" && url.path().contains(QRegularExpression(R"([^/]*)"))) {
+    static QRegularExpression regx(R"([^/]*)");
+    if (url.scheme() == "smb" && url.path().contains(regx)) {
         auto path = url.toString();
         while (path.endsWith("/"))
             path.chop(1);
         *tabName = path;
+        fmInfo() << "Set SMB tab name:" << *tabName;
         return true;
     }
     return false;
@@ -93,16 +101,61 @@ bool SmbBrowserEventReceiver::hookTitleBarAddrHandle(QUrl *url)
     return false;
 }
 
+bool SmbBrowserEventReceiver::hookAllowRepeatUrl(const QUrl &cur, const QUrl &pre)
+{
+    QStringList allowReEnterScehmes { Global::Scheme::kSmb,
+                                      Global::Scheme::kSFtp,
+                                      Global::Scheme::kFtp,
+                                      Global::Scheme::kDav,
+                                      Global::Scheme::kDavs,
+                                      Global::Scheme::kNfs };
+    return allowReEnterScehmes.contains(cur.scheme()) && allowReEnterScehmes.contains(pre.scheme());
+}
+
+bool SmbBrowserEventReceiver::hookCopyFilePath(quint64, const QList<QUrl> &urlList, const QUrl &rootUrl)
+{
+    static QStringList protocolScheme { Global::Scheme::kSmb,
+                                        Global::Scheme::kSFtp,
+                                        Global::Scheme::kFtp,
+                                        Global::Scheme::kDav,
+                                        Global::Scheme::kDavs,
+                                        Global::Scheme::kNfs };
+
+    QStringList pathList;
+    if (protocolScheme.contains(rootUrl.scheme()) || UniversalUtils::isNetworkRoot(rootUrl)) {
+        std::transform(urlList.cbegin(), urlList.cend(), std::back_inserter(pathList),
+                       [](const QUrl &url) {
+                           return UrlRoute::urlToLocalPath(url.toString());
+                       });
+    } else if (getOriginalUri(rootUrl, nullptr)) {
+        for (const auto &url : std::as_const(urlList)) {
+            QUrl orgUrl;
+            if (getOriginalUri(url, &orgUrl))
+                pathList << QUrl::fromPercentEncoding(orgUrl.toString().toUtf8());
+        }
+    }
+
+    if (pathList.isEmpty())
+        return false;
+
+    QMimeData *data = new QMimeData;
+    data->setText(pathList.join('\n'));
+    ClipBoard::instance()->setDataToClipboard(data);
+    return true;
+}
+
 bool SmbBrowserEventReceiver::getOriginalUri(const QUrl &in, QUrl *out)
 {
     QString path = in.path();
 
     // is cifs
-    static const QRegularExpression kCifsPrefix { R"(^/media/[^/]*/smbmounts/smb-share:[^/]*)" };
+    static const QRegularExpression kCifsPrefix { R"(^/(?:run/)?media/[^/]*/smbmounts/smb-share:[^/]*)" };
     if (path.contains(kCifsPrefix)) {
         QString host, share, port;
-        if (!DeviceUtils::parseSmbInfo(path, host, share, &port))
+        if (!DeviceUtils::parseSmbInfo(path, host, share, &port)) {
+            fmWarning() << "Failed to parse SMB info from CIFS path:" << path;
             return false;
+        }
 
         if (out) {
             out->setScheme("smb");
@@ -112,18 +165,20 @@ bool SmbBrowserEventReceiver::getOriginalUri(const QUrl &in, QUrl *out)
             QString subPath = "/" + share;
             subPath += path.remove(kCifsPrefix);
             out->setPath(subPath);
-            return true;
         }
+        return true;
     }
 
     // is gvfs: since mtp/gphoto... scheme are not supported path lookup, only handle ftp/sftp/smb
     // use GIO to obtain the original URI
-    if (path.contains(QRegularExpression(R"(((^/run/user/[0-9]*/gvfs)|(^/root/.gvfs))/(ftp|sftp|smb))"))) {
+    if (path.contains(QRegularExpression(R"(((^/run/user/[0-9]*/gvfs)|(^/root/.gvfs))/(ftp|sftp|smb|dav|davs|nfs))"))) {
         SyncFileInfo f(in);
         QUrl u = f.urlOf(dfmbase::FileInfo::FileUrlInfoType::kOriginalUrl);
-        if (u.isValid() && out) {
-            *out = u;
+        if (u.isValid()) {
+            if (out) *out = u;
             return true;
+        } else {
+            fmWarning() << "Failed to retrieve valid original URL via GIO for path:" << path;
         }
     }
 
@@ -131,4 +186,4 @@ bool SmbBrowserEventReceiver::getOriginalUri(const QUrl &in, QUrl *out)
 }
 
 SmbBrowserEventReceiver::SmbBrowserEventReceiver(QObject *parent)
-    : QObject(parent) {}
+    : QObject(parent) { }

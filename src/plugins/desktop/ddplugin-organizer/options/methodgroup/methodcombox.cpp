@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,6 +16,8 @@ MethodComBox::MethodComBox(const QString &title, QWidget *parent)
 
     comboBox = qobject_cast<DComboBox *>(rightWidget);
     comboBox->setParent(this);
+    comboBox->setObjectName("ComboBox");
+    comboBox->setAccessibleName("ComboBox");
     comboBox->setFixedSize(198, 36);
 
     //Enable the combo box

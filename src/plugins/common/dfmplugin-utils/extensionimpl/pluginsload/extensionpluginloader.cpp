@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -44,9 +44,22 @@ bool ExtensionPluginLoader::initialize()
         return false;
     }
 
-    initFunc = reinterpret_cast<ExtInitFuncType>(loader.resolve("dfm_extension_initiliaze"));
+    // Try to resolve the correctly spelled function name first
+    initFunc = reinterpret_cast<ExtInitFuncType>(loader.resolve("dfm_extension_initialize"));
+    
+    // If not found, try the legacy misspelled function name for backward compatibility
     if (!initFunc) {
-        errorMessage = "Failed, get 'dfm_extension_initiliaze' import function" + loader.fileName();
+        initFunc = reinterpret_cast<ExtInitFuncType>(loader.resolve("dfm_extension_initiliaze"));
+        if (initFunc) {
+            // Log deprecation warning for the misspelled function name
+            qWarning() << "Warning: Plugin" << loader.fileName() 
+                      << "uses deprecated function name 'dfm_extension_initiliaze'. "
+                      << "Please update to 'dfm_extension_initialize'";
+        }
+    }
+    
+    if (!initFunc) {
+        errorMessage = "Failed, get 'dfm_extension_initialize' or 'dfm_extension_initiliaze' import function: " + loader.fileName();
         return false;
     }
 
@@ -127,6 +140,23 @@ DFMEXT::DFMExtWindowPlugin *ExtensionPluginLoader::resolveWindowPlugin()
     }
 
     return windowFunc();
+}
+
+DFMEXT::DFMExtFilePlugin *ExtensionPluginLoader::resolveFilePlugin()
+{
+    if (!loader.isLoaded()) {
+        errorMessage = "Failed, called 'resolveFilePlugin' get interface, "
+                       "need call 'initialize' function befor that";
+        return {};
+    }
+
+    fileFunc = reinterpret_cast<ExtFileFuncType>(loader.resolve("dfm_extension_file"));
+    if (!fileFunc) {
+        errorMessage = "Failed, get 'dfm_extension_file' import function";
+        return {};
+    }
+
+    return fileFunc();
 }
 
 DPUTILS_END_NAMESPACE

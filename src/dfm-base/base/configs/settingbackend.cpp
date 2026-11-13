@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2022 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -7,19 +7,29 @@
 
 #include <dfm-base/base/configs/dconfig/dconfigmanager.h>
 #include <dfm-base/settingdialog/settingjsongenerator.h>
+#include <dfm-base/settingdialog/customsettingitemregister.h>
 #include <dfm-base/dfm_global_defines.h>
+#include <dfm-base/utils/viewdefines.h>
 
 #include <DSettings>
+#include <DLabel>
+#include <DSlider>
+#include <DSettingsOption>
 
 #include <QDebug>
 #include <QApplication>
 
 using namespace dfmbase;
+using namespace GlobalDConfDefines::ConfigPath;
+using namespace GlobalDConfDefines::BaseConfig;
+DFMGLOBAL_USE_NAMESPACE
+DWIDGET_USE_NAMESPACE
 
 #define TOP_GROUP_BASE "00_base"
 #define LV2_GROUP_OPEN_ACTION "00_base.00_open_action"
-#define LV2_GROUP_NEW_TAB_WINDOWS "00_base.01_new_tab_windows"
-#define LV2_GROUP_FILES_AND_FOLDERS "00_base.02_files_and_folders"
+#define LV2_GROUP_NEW_WINDOWS "00_base.01_new_windows"
+#define LV2_GROUP_NEW_TAB "00_base.02_new_tab"
+#define LV2_GROUP_FILES_AND_FOLDERS "00_base.03_files_and_folders"
 
 #define TOP_GROUP_WORKSPACE "02_workspace"
 #define LV2_GROUP_VIEW "02_workspace.00_view"
@@ -32,11 +42,14 @@ using namespace dfmbase;
 
 BidirectionHash<QString, Application::ApplicationAttribute> SettingBackendPrivate::keyToAA {
     { LV2_GROUP_OPEN_ACTION ".00_allways_open_on_new_window", Application::kAllwayOpenOnNewWindow },
-    { LV2_GROUP_OPEN_ACTION ".01_open_file_action", Application::kOpenFileMode },
-    { LV2_GROUP_NEW_TAB_WINDOWS ".00_default_window_path", Application::kUrlOfNewWindow },
-    { LV2_GROUP_NEW_TAB_WINDOWS ".01_new_tab_path", Application::kUrlOfNewTab },
+    { LV2_GROUP_OPEN_ACTION ".01_open_in_new_tab", Application::kOpenInNewTab },
+    { LV2_GROUP_OPEN_ACTION ".03_open_file_action", Application::kOpenFileMode },
+    { LV2_GROUP_NEW_WINDOWS ".01_default_window_path", Application::kUrlOfNewWindow },
+    { LV2_GROUP_NEW_TAB ".01_new_tab_path", Application::kUrlOfNewTab },
     { LV2_GROUP_VIEW ".00_icon_size", Application::kIconSizeLevel },
-    { LV2_GROUP_VIEW ".01_view_mode", Application::kViewMode },
+    { LV2_GROUP_VIEW ".01_icon_grid_density", Application::kGridDensityLevel },
+    { LV2_GROUP_VIEW ".02_list_height", Application::kListHeightLevel },
+    { LV2_GROUP_VIEW ".03_view_mode", Application::kViewMode },
     { LV2_GROUP_FILES_AND_FOLDERS ".02_mixed_sort", Application::kFileAndDirMixedSort },
 };
 
@@ -67,7 +80,11 @@ SettingBackend::SettingBackend(QObject *parent)
 
     connect(Application::instance(), &Application::appAttributeEdited, this, &SettingBackend::onValueChanged);
     connect(Application::instance(), &Application::genericAttributeEdited, this, &SettingBackend::onValueChanged);
-    connect(this, &SettingBackend::optionSetted, this, &SettingBackend::onOptionSetted, Qt::QueuedConnection);
+
+    d->delayedSaveTimer = new QTimer(this);
+    d->delayedSaveTimer->setSingleShot(true);
+    d->delayedSaveTimer->setInterval(100);
+    connect(d->delayedSaveTimer, &QTimer::timeout, this, &SettingBackend::onDelayedSave);
 
     initPresetSettingConfig();
 
@@ -128,71 +145,67 @@ void SettingBackend::addSettingAccessor(const QString &key, GetOptFunc get, Save
     if (set)
         d->setters.insert(key, set);
     else
-        qCInfo(logDFMBase) << "null setter function is passed for key: " << key;
+        qCWarning(logDFMBase) << "Null setter function provided for setting key:" << key;
     if (get)
         d->getters.insert(key, get);
     else
-        qCInfo(logDFMBase) << "null getter function is passed for key: " << key;
+        qCWarning(logDFMBase) << "Null getter function provided for setting key:" << key;
+
+    qCDebug(logDFMBase) << "Setting accessor added for key:" << key;
 }
 
 void SettingBackend::removeSettingAccessor(const QString &key)
 {
     if (!d->setters.contains(key) || !d->getters.contains(key)) {
-        qCWarning(logDFMBase) << "Invalid key, cannot remove!";
+        qCWarning(logDFMBase) << "Cannot remove setting accessor - key not found:" << key;
         return;
     }
 
     d->setters.remove(key);
     d->getters.remove(key);
+    qCDebug(logDFMBase) << "Setting accessor removed for key:" << key;
 }
 
 void SettingBackend::addSettingAccessor(Application::ApplicationAttribute attr, SaveOptFunc set)
 {
     if (!d->keyToAA.containsValue(attr)) {
-        qCWarning(logDFMBase) << "NO mapped for ApplicationAttr::" << attr;
+        qCWarning(logDFMBase) << "No UI key mapping found for ApplicationAttribute:" << static_cast<int>(attr);
         return;
     }
     auto uiKey = d->keyToAA.key(attr);
     addSettingAccessor(uiKey, nullptr, set);
+    qCDebug(logDFMBase) << "Setting accessor added for ApplicationAttribute:" << static_cast<int>(attr) << "key:" << uiKey;
 }
 
 void SettingBackend::addSettingAccessor(Application::GenericAttribute attr, SaveOptFunc set)
 {
     if (!d->keyToGA.containsValue(attr)) {
-        qCWarning(logDFMBase) << "NO map for GenericAttr::" << attr;
+        qCWarning(logDFMBase) << "No UI key mapping found for GenericAttribute:" << static_cast<int>(attr);
         return;
     }
     auto uiKey = d->keyToGA.key(attr);
     addSettingAccessor(uiKey, nullptr, set);
-}
-
-void SettingBackend::addToSerialDataKey(const QString &key)
-{
-    d->serialDataKey.insert(key);
-}
-
-void SettingBackend::removeSerialDataKey(const QString &key)
-{
-    d->serialDataKey.remove(key);
-}
-
-void SettingBackend::onOptionSetted(const QString &key, const QVariant &value)
-{
-    if (d->serialDataKey.contains(key)) {
-        d->saveAsAppAttr(key, value);
-        d->saveAsGenAttr(key, value);
-        d->saveByFunc(key, value);
-    } else {
-        QSignalBlocker blocker(this);
-        d->saveAsAppAttr(key, value);
-        d->saveAsGenAttr(key, value);
-        d->saveByFunc(key, value);
-    }
+    qCDebug(logDFMBase) << "Setting accessor added for GenericAttribute:" << static_cast<int>(attr) << "key:" << uiKey;
 }
 
 void SettingBackend::doSetOption(const QString &key, const QVariant &value)
 {
-    Q_EMIT optionSetted(key, value);
+    // 将选项延迟保存，保证选项不会因信号阻塞而丢失相关信号
+    d->pendingSaveData.insert(key, value);
+    d->delayedSaveTimer->start();
+}
+
+void SettingBackend::onDelayedSave()
+{
+    QSignalBlocker blocker(this);
+    for (auto it = d->pendingSaveData.cbegin(); it != d->pendingSaveData.cend(); ++it) {
+        const QString &key = it.key();
+        const QVariant &value = it.value();
+        d->saveAsAppAttr(key, value);
+        d->saveAsGenAttr(key, value);
+        d->saveByFunc(key, value);
+    }
+    d->pendingSaveData.clear();
 }
 
 void SettingBackend::onValueChanged(int attribute, const QVariant &value)
@@ -227,36 +240,61 @@ void SettingBackend::initBasicSettingConfig()
     ins->addCheckBoxConfig(LV2_GROUP_OPEN_ACTION ".00_allways_open_on_new_window",
                            tr("Always open folder in new window"),
                            false);
-    ins->addComboboxConfig(LV2_GROUP_OPEN_ACTION ".01_open_file_action",
+    ins->addCheckBoxConfig(LV2_GROUP_OPEN_ACTION ".01_open_in_new_tab",
+                           tr("Open new folder in a new tab"),
+                           false);
+    ins->addCheckBoxConfig(LV2_GROUP_OPEN_ACTION ".02_open_folder_windows_in_aseparate_process",
+                           tr("Activate existing window when reopening folder"),
+                           false);
+    addSettingAccessor(
+            LV2_GROUP_OPEN_ACTION ".02_open_folder_windows_in_aseparate_process",
+            []() {
+                return !(DConfigManager::instance()->value(kViewDConfName,
+                                                           kOpenFolderWindowsInASeparateProcess,
+                                                           true)
+                                 .toBool());
+            },
+            [](const QVariant &val) {
+                DConfigManager::instance()->setValue(kViewDConfName,
+                                                     kOpenFolderWindowsInASeparateProcess,
+                                                     !(val.toBool()));
+            });
+    ins->addComboboxConfig(LV2_GROUP_OPEN_ACTION ".03_open_file_action",
                            tr("Open file:"),
                            QStringList { tr("Click"),
                                          tr("Double click") },
                            1);
 
     // base / new_win_and_tab
-    ins->addGroup(LV2_GROUP_NEW_TAB_WINDOWS, tr("New window and tab"));
-    ins->addComboboxConfig(LV2_GROUP_NEW_TAB_WINDOWS ".00_default_window_path",
-                           tr("Open from default window:"),
-                           { { "values",
-                               QStringList { tr("Computer"),
-                                             tr("Home"),
-                                             tr("Desktop"),
-                                             tr("Videos"),
-                                             tr("Music"),
-                                             tr("Pictures"),
-                                             tr("Documents"),
-                                             tr("Downloads") } },
-                             { "keys",
-                               QStringList { "computer:///",
-                                             "standard://home",
-                                             "standard://desktop",
-                                             "standard://videos",
-                                             "standard://music",
-                                             "standard://pictures",
-                                             "standard://documents",
-                                             "standard://downloads" } } },
-                           "computer:///");
-    ins->addComboboxConfig(LV2_GROUP_NEW_TAB_WINDOWS ".01_new_tab_path",
+    ins->addGroup(LV2_GROUP_NEW_WINDOWS, tr("New window"));
+    ins->addConfig(LV2_GROUP_NEW_WINDOWS ".00_message_label",
+                   { { "key", "00_message_label" },
+                     { "name", tr("Display when launching a new window:") },
+                     { "type", "label" } });
+    ins->addPathComboboxConfig(LV2_GROUP_NEW_WINDOWS ".01_default_window_path",
+                               tr("Default Directory"),
+                               { { "values",
+                                   QStringList { tr("Computer"),
+                                                 tr("Home"),
+                                                 tr("Desktop"),
+                                                 tr("Videos"),
+                                                 tr("Music"),
+                                                 tr("Pictures"),
+                                                 tr("Documents"),
+                                                 tr("Downloads") } },
+                                 { "keys",
+                                   QStringList { "computer:///",
+                                                 "standard://home",
+                                                 "standard://desktop",
+                                                 "standard://videos",
+                                                 "standard://music",
+                                                 "standard://pictures",
+                                                 "standard://documents",
+                                                 "standard://downloads" } } },
+                               "computer:///");
+
+    ins->addGroup(LV2_GROUP_NEW_TAB, tr("New tab"));
+    ins->addComboboxConfig(LV2_GROUP_NEW_TAB ".01_new_tab_path",
                            tr("Open in new tab:"),
                            { { "values",
                                QStringList { tr("Current Directory"),
@@ -298,46 +336,55 @@ void SettingBackend::initWorkspaceSettingConfig()
     ins->addGroup(TOP_GROUP_WORKSPACE, tr("Workspace"));
     ins->addGroup(LV2_GROUP_VIEW, tr("View"));
 
-    ins->addComboboxConfig(LV2_GROUP_VIEW ".00_icon_size",
-                           tr("Default size:"),
-                           QStringList { tr("Extra small"),
-                                         tr("Small"),
-                                         tr("Medium"),
-                                         tr("Large"),
-                                         tr("Extra large") },
-                           1);
+    ViewDefines viewDefines;
+
+    int iconSizeLevelMax = viewDefines.iconSizeCount() - 1;
+    int iconSizeLevelMin = 0;
+    ins->addSliderConfig(LV2_GROUP_VIEW ".00_icon_size",
+                         tr("Default icon size:"),
+                         "dfm_viewoptions_minicon",
+                         "dfm_viewoptions_maxicon",
+                         iconSizeLevelMax,
+                         iconSizeLevelMin,
+                         viewDefines.getIconSizeList(),
+                         5);
+    int iconGridDensityLevelMax = viewDefines.iconGridDensityCount() - 1;
+    int iconGridDensityLevelMin = 0;
+    ins->addSliderConfig(LV2_GROUP_VIEW ".01_icon_grid_density",
+                         tr("Default icon grid density:"),
+                         "dfm_viewoptions_mingrid",
+                         "dfm_viewoptions_maxgrid",
+                         iconGridDensityLevelMax,
+                         iconGridDensityLevelMin,
+                         viewDefines.getIconGridDensityList(),
+                         2);
+    int listHeightLevelMax = viewDefines.listHeightCount() - 1;
+    int listHeightLevelMin = 0;
+    ins->addSliderConfig(LV2_GROUP_VIEW ".02_list_height",
+                         tr("Default list height:"),
+                         "dfm_viewoptions_minlist",
+                         "dfm_viewoptions_maxlist",
+                         listHeightLevelMax,
+                         listHeightLevelMin,
+                         viewDefines.getListHeightList(),
+                         1);
     QStringList viewModeValues { tr("Icon"), tr("List") };
     QVariantList viewModeKeys { 1, 2 };
     if (DConfigManager::instance()->value(kViewDConfName, kTreeViewEnable, true).toBool()) {
-        viewModeValues.append( tr("Tree") );
+        viewModeValues.append(tr("Tree"));
         viewModeKeys.append(8);
     }
-    ins->addComboboxConfig(LV2_GROUP_VIEW ".01_view_mode",
+    ins->addComboboxConfig(LV2_GROUP_VIEW ".03_view_mode",
                            tr("Default view:"),
                            { { "values", viewModeValues },
                              { "keys", viewModeKeys } },
                            1);
-    ins->addConfig(LV2_GROUP_VIEW ".02_restore_view_mode",
-                   { { "key", "02_restore_view_mode" },
+    ins->addConfig(LV2_GROUP_VIEW ".04_restore_view_mode",
+                   { { "key", "04_restore_view_mode" },
                      { "desc", tr("Restore default view mode for all directories") },
                      { "text", tr("Restore default view mode") },
                      { "type", "pushButton" },
                      { "trigger", QVariant(Application::kRestoreViewMode) } });
-    ins->addCheckBoxConfig(LV2_GROUP_VIEW ".03_open_folder_windows_in_aseparate_process",
-                           tr("Open folder windows in a separate process"),
-                           false);
-    addSettingAccessor(
-            LV2_GROUP_VIEW ".03_open_folder_windows_in_aseparate_process",
-            []() {
-                return DConfigManager::instance()->value(kViewDConfName,
-                                                         kOpenFolderWindowsInASeparateProcess,
-                                                         false);
-            },
-            [](const QVariant &val) {
-                DConfigManager::instance()->setValue(kViewDConfName,
-                                                     kOpenFolderWindowsInASeparateProcess,
-                                                     val);
-            });
 
     ins->addGroup(LV2_GROUP_PREVIEW, tr("Thumbnail preview"));
 
@@ -356,8 +403,8 @@ void SettingBackend::initWorkspaceSettingConfig()
                            tr("Music preview"));
     ins->addConfig(LV2_GROUP_PREVIEW ".06_remote_env_file_preview",
                    { { "key", "06_remote_env_file_preview" },
-                     { "text", tr("The remote environment shows thumbnail previews") },
-                     { "message", tr("Turning on the thumbnail preview may cause the remote directory to load slowly or the operation to freeze") },
+                     { "text", tr("Load thumbnails for network, mobile, and optical disc directories") },
+                     { "message", tr("Thumbnails will be loaded for high-latency devices like network shares, phones, and optical drives, which may affect loading speed") },
                      { "type", "checkBoxWithMessage" },
                      { "default", false } });
 }

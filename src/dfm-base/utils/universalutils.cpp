@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2020 - 2023 UnionTech Software Technology Co., Ltd.
+// SPDX-FileCopyrightText: 2020 - 2026 UnionTech Software Technology Co., Ltd.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "universalutils.h"
+#include "fileutils.h"
 
 #include <dfm-base/dfm_event_defines.h>
 #include <dfm-base/base/schemefactory.h>
@@ -15,54 +16,40 @@
 #include <QApplication>
 #include <QThread>
 #include <QDebug>
-#include <QX11Info>
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+#    include <QX11Info>
+#endif
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QDBusConnectionInterface>
 #include <QRegularExpression>
 #include <DUtil>
 
-#ifdef COMPILE_ON_V23
-#    define APP_MANAGER_SERVICE "org.desktopspec.ApplicationManager1"
-#    define APP_MANAGER_PATH_PREFIX "/org/desktopspec/ApplicationManager1"
-#    define APP_INTERFACE "org.desktopspec.ApplicationManager1.Application"
+#include <cmath>
+#include <QDBusConnection>
+#include <QDBusPendingCallWatcher>
+#include <QDBusMessage>
 
-#    define SYSTEM_SYSTEMINFO_SERVICE "org.deepin.dde.SystemInfo1"
-#    define SYSTEM_SYSTEMINFO_PATH "/org/deepin/dde/SystemInfo1"
-#    define SYSTEM_SYSTEMINFO_INTERFACE "org.deepin.dde.SystemInfo1"
+#define SYSTEM_SYSTEMINFO_SERVICE "org.deepin.dde.SystemInfo1"
+#define SYSTEM_SYSTEMINFO_PATH "/org/deepin/dde/SystemInfo1"
+#define SYSTEM_SYSTEMINFO_INTERFACE "org.deepin.dde.SystemInfo1"
 
-#    define DEAMON_SYSTEMINFO_SERVICE "org.deepin.daemon.SystemInfo1"
-#    define DEAMON_SYSTEMINFO_PATH "/org/deepin/daemon/SystemInfo1"
-#    define DEAMON_SYSTEMINFO_INTERFACE "org.deepin.daemon.SystemInfo1"
+#define DEAMON_DOCK_SERVICE "org.deepin.dde.daemon.Dock1"
+#define DEAMON_DOCK_PATH "/org/deepin/dde/daemon/Dock1"
+#define DEAMON_DOCK_INTERFACE "org.deepin.dde.daemon.Dock1"
 
-#    define DEAMON_DOCK_SERVICE "org.deepin.dde.daemon.Dock1"
-#    define DEAMON_DOCK_PATH "/org/deepin/dde/daemon/Dock1"
-#    define DEAMON_DOCK_INTERFACE "org.deepin.dde.daemon.Dock1"
+#define DDE_LOCKSERVICE_SERVICE "org.deepin.dde.LockService1"
+#define DDE_LOCKSERVICE_PATH "/org/deepin/dde/LockService1"
+#define DDE_LOCKSERVICE_INTERFACE "org.deepin.dde.LockService1"
 
-#    define DDE_LOCKSERVICE_SERVICE "org.deepin.dde.LockService1"
-#    define DDE_LOCKSERVICE_PATH "/org/deepin/dde/LockService1"
-#    define DDE_LOCKSERVICE_INTERFACE "org.deepin.dde.LockService1"
-#else
-#    define APP_MANAGER_SERVICE "com.deepin.SessionManager"
-#    define APP_MANAGER_PATH "/com/deepin/StartManager"
-#    define APP_MANAGER_INTERFACE "com.deepin.StartManager"
+#define DESKTOP_FILEMONITOR_SERVICE "org.deepin.dde.desktop.filemonitor"
+#define DESKTOP_FILEMONITOR_PATH "/org/deepin/dde/desktop/filemonitor"
+#define DESKTOP_FILEMONITOR_INTERFACE "org.deepin.dde.desktop.filemonitor"
 
-#    define SYSTEM_SYSTEMINFO_SERVICE "com.deepin.system.SystemInfo"
-#    define SYSTEM_SYSTEMINFO_PATH "/com/deepin/system/SystemInfo"
-#    define SYSTEM_SYSTEMINFO_INTERFACE "com.deepin.system.SystemInfo"
-
-#    define DEAMON_SYSTEMINFO_SERVICE "com.deepin.daemon.SystemInfo"
-#    define DEAMON_SYSTEMINFO_PATH "/com/deepin/daemon/SystemInfo"
-#    define DEAMON_SYSTEMINFO_INTERFACE "com.deepin.daemon.SystemInfo"
-
-#    define DEAMON_DOCK_SERVICE "com.deepin.dde.daemon.Dock"
-#    define DEAMON_DOCK_PATH "/com/deepin/dde/daemon/Dock"
-#    define DEAMON_DOCK_INTERFACE "com.deepin.dde.daemon.Dock"
-
-#    define DDE_LOCKSERVICE_SERVICE "com.deepin.dde.LockService"
-#    define DDE_LOCKSERVICE_PATH "/com/deepin/dde/LockService"
-#    define DDE_LOCKSERVICE_INTERFACE "com.deepin.dde.LockService"
-#endif
+#define IDLE_SCREEN_SAVER_SERVICE "org.freedesktop.ScreenSaver"
+#define IDLE_SCREEN_SAVER_PATH "/org/freedesktop/ScreenSaver"
+#define IDLE_SCREEN_SAVER_INTERFACE "org.freedesktop.ScreenSaver"
 
 namespace dfmbase {
 
@@ -109,6 +96,37 @@ void UniversalUtils::notifyMessage(const QString &title, const QString &msg)
             .arg(QVariantMap())
             .arg(5000)
             .call();
+}
+
+/*!
+ * \brief send a notification with action buttons to Notification Center
+ * \param title the notification title (summary)
+ * \param msg the notification body
+ * \param actions alternating action id and label pairs, e.g. {"ok", "OK", "cancel", "Cancel"}
+ * \param callback invoked when an action button is clicked; receives the action id
+ */
+void UniversalUtils::notifyMessage(const QString &title, const QString &msg,
+                                   const QStringList &actions, const QVariantMap &hints)
+{
+    if (actions.isEmpty()) {
+        notifyMessage(title, msg);
+        return;
+    }
+
+    QDBusPendingCall pending = DDBusSender()
+                                       .service("org.freedesktop.Notifications")
+                                       .path("/org/freedesktop/Notifications")
+                                       .interface("org.freedesktop.Notifications")
+                                       .method(QString("Notify"))
+                                       .arg(QObject::tr("dde-file-manager"))
+                                       .arg(static_cast<uint>(0))
+                                       .arg(QString("dde-file-manager"))
+                                       .arg(title)
+                                       .arg(msg)
+                                       .arg(actions)
+                                       .arg(hints)
+                                       .arg(5000)
+                                       .call();
 }
 
 /*!
@@ -161,9 +179,9 @@ bool UniversalUtils::inMainThread()
  */
 void UniversalUtils::blockShutdown(QDBusReply<QDBusUnixFileDescriptor> &replay)
 {
-    qCInfo(logDFMBase) << " create dbus to block computer shut down!!!";
+    qCInfo(logDFMBase) << "Creating DBus inhibitor to block system shutdown";
     if (replay.value().isValid()) {
-        qCWarning(logDFMBase) << "current qt dbus replyBlokShutDown is using!";
+        qCWarning(logDFMBase) << "Shutdown block already active, skipping new request";
         return;
     }
 
@@ -173,13 +191,13 @@ void UniversalUtils::blockShutdown(QDBusReply<QDBusUnixFileDescriptor> &replay)
                                 QDBusConnection::systemBus());
 
     QList<QVariant> arg;
-    arg << QString("shutdown:sleep:")   // what
+    arg << QString("shutdown:sleep")   // what
         << qApp->applicationDisplayName()   // who
         << QObject::tr("Files are being processed")   // why
         << QString("block");   // mode
 
     replay = loginManager.callWithArgumentList(QDBus::Block, "Inhibit", arg);
-    qCInfo(logDFMBase) << " create over dbus to block computer shut down!!!";
+    qCInfo(logDFMBase) << "System shutdown block created successfully";
 }
 
 qint64 UniversalUtils::computerMemory()
@@ -199,9 +217,9 @@ qint64 UniversalUtils::computerMemory()
 
 void UniversalUtils::computerInformation(QString &cpuinfo, QString &systemType, QString &edition, QString &version)
 {
-    QDBusInterface systemInfo(DEAMON_SYSTEMINFO_SERVICE,
-                              DEAMON_SYSTEMINFO_PATH,
-                              DEAMON_SYSTEMINFO_INTERFACE,
+    QDBusInterface systemInfo(SYSTEM_SYSTEMINFO_SERVICE,
+                              SYSTEM_SYSTEMINFO_PATH,
+                              SYSTEM_SYSTEMINFO_INTERFACE,
                               QDBusConnection::sessionBus());
 
     if (systemInfo.isValid()) {
@@ -251,113 +269,10 @@ QString UniversalUtils::sizeFormat(qint64 size, int percision)
     return QString("%1 %2").arg(QString::number(numberPart, 'f', percision)).arg(unit);
 }
 
-bool UniversalUtils::checkLaunchAppInterface()
-{
-    static bool initStatus = true;
-    static std::once_flag flag;
-    std::call_once(flag, []() {
-        QDBusConnectionInterface *interface = QDBusConnection::sessionBus().interface();
-        if (!interface || !interface->isServiceRegistered(APP_MANAGER_SERVICE).value()) {
-            initStatus = false;
-            return;
-        }
-#ifndef COMPILE_ON_V23
-        QDBusInterface introspect(APP_MANAGER_SERVICE,
-                                  APP_MANAGER_PATH,
-                                  "org.freedesktop.DBus.Introspectable",
-                                  QDBusConnection::sessionBus());
-        introspect.setTimeout(1000);
-        QDBusPendingReply<QString> reply = introspect.asyncCallWithArgumentList(QStringLiteral("Introspect"), {});
-        reply.waitForFinished();
-        if (reply.isFinished() && reply.isValid() && !reply.isError()) {
-            QString xmlCode = reply.argumentAt(0).toString();
-            if (xmlCode.contains(APP_MANAGER_INTERFACE)) {
-                if (xmlCode.contains("LaunchApp")) {
-                    initStatus = true;
-                } else {
-                    qCWarning(logDFMBase) << QString("%1 : doesn't have LaunchApp interface.").arg(APP_MANAGER_SERVICE);
-                    initStatus = false;
-                }
-            } else {
-                qCWarning(logDFMBase) << QString("%1 : Introspect error").arg(APP_MANAGER_SERVICE) << xmlCode;
-                initStatus = false;
-            }
-        } else {
-            initStatus = false;
-        }
-#endif
-    });
-    return initStatus;
-}
-
-bool UniversalUtils::launchAppByDBus(const QString &desktopFile, const QStringList &filePaths)
-{
-#ifdef COMPILE_ON_V23
-    const auto &file = QFileInfo{desktopFile};
-    constexpr auto kDesktopSuffix { u8"desktop" };
-
-    if (file.suffix() != kDesktopSuffix) {
-        qCDebug(logDFMBase) << "invalid desktop file:" << desktopFile << file;
-        return false;
-    }
-
-    const auto &DBusAppId = DUtil::escapeToObjectPath(file.completeBaseName());
-    const auto &currentAppPath = QString { APP_MANAGER_PATH_PREFIX } + "/" + DBusAppId;
-    qCDebug(logDFMBase) << "app object path:" << currentAppPath;
-    QDBusInterface appManager(APP_MANAGER_SERVICE,
-                              currentAppPath,
-                              APP_INTERFACE,
-                              QDBusConnection::sessionBus());
-
-    auto reply = appManager.callWithArgumentList(QDBus::Block, QStringLiteral("Launch"), { QVariant::fromValue(QString {}), QVariant::fromValue(filePaths), QVariant::fromValue(QVariantMap {}) });
-
-    return reply.type() == QDBusMessage::ReplyMessage;
-
-#else
-    QDBusInterface appManager(APP_MANAGER_SERVICE,
-                              APP_MANAGER_PATH,
-                              APP_MANAGER_INTERFACE,
-                              QDBusConnection::sessionBus());
-
-    QList<QVariant> argumentList;
-    argumentList << QVariant::fromValue(desktopFile) << QVariant::fromValue(static_cast<uint>(QX11Info::getTimestamp())) << QVariant::fromValue(filePaths);
-    appManager.asyncCallWithArgumentList(QStringLiteral("LaunchApp"), argumentList);
-    return true;
-#endif
-}
-
 bool UniversalUtils::runCommand(const QString &cmd, const QStringList &args, const QString &wd)
 {
-#ifdef COMPILE_ON_V23
-    qCDebug(logDFMBase) << "new AM wouldn't provide any method to run Command, so launch cmd by qt:" << cmd << args;
+    qCDebug(logDFMBase) << "Running command via Qt process (V2X mode):" << cmd << args;
     return QProcess::startDetached(cmd, args, wd);
-#else
-    if (checkLaunchAppInterface()) {
-        qCDebug(logDFMBase) << "launch cmd by dbus:" << cmd << args;
-        QDBusInterface appManager(APP_MANAGER_SERVICE,
-                                  APP_MANAGER_PATH,
-                                  APP_MANAGER_INTERFACE,
-                                  QDBusConnection::sessionBus());
-
-        QList<QVariant> argumentList;
-        argumentList << QVariant::fromValue(cmd) << QVariant::fromValue(args);
-
-        if (!wd.isEmpty()) {
-            QVariantMap opt = { { "dir", wd } };
-            argumentList << QVariant::fromValue(opt);
-            appManager.asyncCallWithArgumentList(QStringLiteral("RunCommandWithOptions"), argumentList);
-        } else {
-            appManager.asyncCallWithArgumentList(QStringLiteral("RunCommand"), argumentList);
-        }
-
-        return true;
-    } else {
-        qCDebug(logDFMBase) << "launch cmd by qt:" << cmd << args;
-        return QProcess::startDetached(cmd, args, wd);
-    }
-
-    return false;
-#endif
 }
 
 int UniversalUtils::dockHeight()
@@ -389,7 +304,7 @@ QMap<QString, QString> UniversalUtils::getKernelParameters()
     for (const QByteArray &onePara : paraList) {
         int equalsIdx = onePara.indexOf('=');
         QString key = equalsIdx == -1 ? onePara.trimmed() : onePara.left(equalsIdx).trimmed();
-        QString value = equalsIdx == -1 ? QString() : onePara.right(equalsIdx).trimmed();
+        QString value = equalsIdx == -1 ? QString() : onePara.mid(equalsIdx + 1).trimmed();
         result.insert(key, value);
     }
 
@@ -430,6 +345,24 @@ bool UniversalUtils::urlEquals(const QUrl &url1, const QUrl &url2)
         path2.append("/");
 
     if (url1.scheme() == url2.scheme() && path1 == path2 && url1.host() == url2.host())
+        return true;
+    return false;
+}
+
+bool UniversalUtils::urlEqualsWithQuery(const QUrl &url1, const QUrl &url2)
+{
+    if (!url1.isValid() || !url2.isValid())
+        return false;
+    if (url1 == url2)
+        return true;
+
+    auto path1 { url1.path() }, path2 { url2.path() };
+    if (!path1.endsWith("/"))
+        path1.append("/");
+    if (!path2.endsWith("/"))
+        path2.append("/");
+
+    if (url1.scheme() == url2.scheme() && path1 == path2 && url1.host() == url2.host() && url1.query() == url2.query())
         return true;
     return false;
 }
@@ -482,6 +415,10 @@ bool UniversalUtils::urlTransformToLocal(const QUrl &sourceUrl, QUrl *targetUrls
 QString UniversalUtils::getCurrentUser()
 {
     QString user;
+
+    // 检查是否有这个系统dbus
+    if (!checkDbusService(DDE_LOCKSERVICE_SERVICE, true))
+        return user;
 
     QDBusInterface sessionManagerIface(DDE_LOCKSERVICE_SERVICE,
                                        DDE_LOCKSERVICE_PATH,
@@ -552,4 +489,175 @@ QString UniversalUtils::covertUrlToLocalPath(const QString &url)
         return QUrl(QUrl::fromPercentEncoding(url.toUtf8())).toLocalFile();
 }
 
+void UniversalUtils::boardCastPastData(const QUrl &sourcPath, const QUrl &targetPath, const QList<QUrl> &files)
+{
+    // 检查是否有这个系统dbus
+    if (!checkDbusService(DESKTOP_FILEMONITOR_SERVICE, false))
+        return;
+
+    QDBusInterface fileMonitor(DESKTOP_FILEMONITOR_SERVICE,
+                               DESKTOP_FILEMONITOR_PATH,
+                               DESKTOP_FILEMONITOR_INTERFACE,
+                               QDBusConnection::sessionBus());
+
+    QList<QVariant> data;
+    data.append(sourcPath.toString());
+    data.append(targetPath.toString());
+    QStringList fileNames;
+    for (const auto &file : files) {
+        fileNames.append(file.fileName());
+    }
+
+    data.append(fileNames);
+    fileMonitor.asyncCallWithArgumentList(QStringLiteral("PrepareSendData"), data);
 }
+
+int UniversalUtils::getTextLineHeight(const QModelIndex &index, const QFontMetrics &fontMetrics)
+{
+    auto text = index.data(Global::ItemRoles::kItemFileDisplayNameRole).toString();
+    return getTextLineHeight(text, fontMetrics);
+}
+
+int UniversalUtils::getTextLineHeight(const QString &text, const QFontMetrics &fontMetrics)
+{
+    // Use QFontMetricsF to avoid int truncation under fractional scaling (e.g. 125%).
+    // QFontMetrics returns int which discards sub-pixel metrics, causing line spacing
+    // to be too small and descenders (g, p, y, q) of the upper line to be clipped
+    // by the next line's background/text.
+    QFontMetricsF fmF(fontMetrics);
+    const int fontHeight = static_cast<int>(std::ceil(fmF.height()));
+    if (text.isEmpty())
+        return fontHeight;
+
+    const QRectF textRectF = fmF.boundingRect(text);
+    const int tightHeight = static_cast<int>(std::ceil(textRectF.height()));
+    if (tightHeight <= 0)
+        return fontHeight;
+
+    return qMax(fontHeight, tightHeight);
+}
+
+uint32_t UniversalUtils::lockScreenSaver()
+{
+    qCInfo(logDFMBase) << "UniversalUtils::lockScreenSaver create dbus to block computer screen saver!!!";
+
+    // 检查是否有这个系统dbus
+    if (!checkDbusService(IDLE_SCREEN_SAVER_SERVICE, false))
+        return 0;
+
+    QDBusInterface screenSaverManager(IDLE_SCREEN_SAVER_SERVICE,
+                                      IDLE_SCREEN_SAVER_PATH,
+                                      IDLE_SCREEN_SAVER_INTERFACE,
+                                      QDBusConnection::sessionBus());
+
+    QList<QVariant> arg;
+    arg << qApp->applicationDisplayName()   // who
+        << QObject::tr("Files are being processed");   // why;
+
+    QDBusReply<uint32_t> reply = screenSaverManager.callWithArgumentList(QDBus::AutoDetect, "Inhibit", arg);
+    if (reply.isValid()) {
+        qCInfo(logDFMBase) << "Inhibition cookie:" << reply.value();
+        return reply.value();
+    }
+
+    qCWarning(logDFMBase) << "UniversalUtils::lockScreenSaver Failed to inhibit screensaver:" << reply.error().message();
+
+    return 0;
+}
+
+bool UniversalUtils::unlockScreenSaver(const uint32_t cookie)
+{
+    qCInfo(logDFMBase) << "UniversalUtils::unlockScreenSaver create dbus to unblock computer screen saver!!!";
+    // 检查是否有这个系统dbus
+    if (!checkDbusService(IDLE_SCREEN_SAVER_SERVICE, false))
+        return false;
+
+    QDBusInterface screenSaverManager(IDLE_SCREEN_SAVER_SERVICE,
+                                      IDLE_SCREEN_SAVER_PATH,
+                                      IDLE_SCREEN_SAVER_INTERFACE,
+                                      QDBusConnection::sessionBus());
+
+    QList<QVariant> arg;
+    arg << cookie;   // cookie
+
+    QDBusReply<void> reply = screenSaverManager.callWithArgumentList(QDBus::Block, "UnInhibit", arg);
+    if (reply.isValid()) {
+        qCInfo(logDFMBase) << "UniversalUtils::unlockScreenSaver call UnInhibit finished! ";
+        return true;
+    }
+
+    qCWarning(logDFMBase) << "UniversalUtils::unlockScreenSaver Failed to uninhibit screensaver:" << reply.error().message();
+
+    return false;
+}
+
+bool UniversalUtils::checkDbusService(const QString &service, bool isSystemDbus)
+{
+    QDBusConnectionInterface *interface { nullptr };
+    if (isSystemDbus) {
+        interface = QDBusConnection::systemBus().interface();
+    } else {
+        interface = QDBusConnection::sessionBus().interface();
+    }
+
+    if (!interface) {
+        qCWarning(logDFMBase) << "UniversalUtils::checkDbusService"
+                              << (isSystemDbus ? "system" : "session")
+                              << "dbus interface is null, service = "
+                              << service;
+        return false;
+    }
+
+    if (!interface->isServiceRegistered(service).value()) {
+        qCWarning(logDFMBase) << "UniversalUtils::checkDbusService"
+                              << (isSystemDbus ? "system" : "session")
+                              << "dbus have not sevice : "
+                              << service;
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief FileUtils::setDockDnDMimeData
+ * Writes dock drag-and-drop metadata for a single desktop file or local directory.
+ *
+ * Sets "text/x-dde-dock-dnd-appid" to the application ID derived from \a url,
+ * and "text/x-dde-dock-dnd-source" to \a source.
+ * Local directories carry an opaque file-manager folder reference under
+ * "text/x-dde-dock-dnd-folder"; their original URL drag data is preserved.
+ *
+ * @param mimeData  The QMimeData object to populate. Must not be null.
+ * @param url       A local URL pointing to a directory or .desktop file.
+ * @param source    The drag source identifier (e.g. "dde-desktop").
+ */
+void UniversalUtils::setDockDnDMimeData(QMimeData *mimeData, const QUrl &url, const QString &source)
+{
+    Q_ASSERT(mimeData);
+
+    const QFileInfo info(url.toLocalFile());
+    if (url.isLocalFile() && url.host().isEmpty() && info.isDir() && info.isReadable()) {
+        const auto path = info.canonicalFilePath();
+        if (path.isEmpty()) return;
+        const auto directory = QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded);
+        const auto reference = QByteArray("folder/filemanager/") + directory.toUtf8().toBase64(
+            QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+        mimeData->setData(QStringLiteral("text/x-dde-dock-dnd-folder"), reference);
+        mimeData->setData(QStringLiteral("text/x-dde-dock-dnd-source"), source.toUtf8());
+        return;
+    }
+
+    if (auto info = InfoFactory::create<FileInfo>(url)) {
+        const auto &appId = info->nameOf(NameInfoType::kCompleteBaseName);
+        if (appId.isEmpty())
+            return;
+
+        mimeData->setData(QStringLiteral("text/x-dde-dock-dnd-appid"), appId.toUtf8());
+        mimeData->setData(QStringLiteral("text/x-dde-dock-dnd-source"), source.toUtf8());
+    }
+}
+
+}
+
+#include "universalutils.moc"
